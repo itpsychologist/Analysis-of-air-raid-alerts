@@ -74,6 +74,8 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
    ```
 5. Deploy. The app will auto-install `requirements.txt`.
 
+You can open online result of my project for link:
+https://analysis-of-air-raid-alerts-kpetxtqhtsiwrspcccpfpt.streamlit.app/
 ---
 
 ## 📐 Project Architecture
