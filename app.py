@@ -579,15 +579,32 @@ def make_forecast_chart(
         ))
 
     # Vertical divider between historical and forecast
+    # NOTE: fig.add_vline() is intentionally NOT used here. With a pandas
+    # Timestamp/datetime x-axis, Plotly's internal annotation auto-placement
+    # (axis_spanning_shape_annotation -> annotation_params_for_line -> _mean(X))
+    # tries to do float(sum(x)) / len(x) on Timestamp objects, which raises a
+    # TypeError on current pandas/plotly combinations. Adding the shape and
+    # annotation manually avoids that buggy code path entirely.
     if not forecast_df.empty and not daily_df.empty:
-        boundary = forecast_df["date"].iloc[0].isoformat()
-        fig.add_vline(
+        boundary = forecast_df["date"].iloc[0]
+
+        fig.add_shape(
+            type="line",
+            x0=boundary, x1=boundary,
+            y0=0, y1=1,
+            xref="x", yref="paper",
+            line=dict(color="rgba(255,255,255,0.3)", dash="dash"),
+        )
+        fig.add_annotation(
             x=boundary,
-            line_dash="dash",
-            line_color="rgba(255,255,255,0.3)",
-            annotation_text="Forecast Start",
-            annotation_font_color="rgba(255,255,255,0.5)",
-            annotation_position="top right",
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Forecast Start",
+            showarrow=False,
+            font=dict(color="rgba(255,255,255,0.5)"),
+            xanchor="left",
+            yanchor="bottom",
         )
 
     fig.update_layout(
@@ -668,19 +685,29 @@ def make_risk_gauge(score: float, oblast_label: str) -> go.Figure:
 # Sidebar
 # ---------------------------------------------------------------------------
 
-def render_sidebar(api_ok: bool, last_updated: Optional[datetime], active_count: int) -> dict:
+def render_sidebar(
+    api_ok: bool,
+    last_updated: Optional[datetime],
+    active_count: int,
+    history_failures: Optional[dict] = None,
+) -> dict:
     """
     Render the sidebar controls and return the user's filter selections.
 
     Args:
-        api_ok:       Whether the API connection was successful.
-        last_updated: Timestamp of the last successful data fetch.
-        active_count: Number of currently active alerts from the API.
+        api_ok:           Whether the API connection was successful.
+        last_updated:      Timestamp of the last successful data fetch.
+        active_count:      Number of currently active alerts from the API.
+        history_failures:  Dict of {oblast_en: reason} for oblasts whose
+                            history fetch failed or returned nothing, as
+                            reported by etl.fetch_and_process_data().
 
     Returns:
         Dict with keys: selected_oblasts (list[str]), days_range (int),
         fetch_history (bool), forecast_horizon (int).
     """
+    history_failures = history_failures or {}
+
     with st.sidebar:
         st.markdown("## 🚨 Dashboard Controls")
 
@@ -705,6 +732,13 @@ def render_sidebar(api_ok: bool, last_updated: Optional[datetime], active_count:
 
         if last_updated:
             st.caption(f"Last updated: {last_updated.strftime('%H:%M:%S UTC')}")
+
+        # Surface per-oblast history fetch issues instead of letting them
+        # fail silently into logs (which Streamlit Cloud users never see).
+        if history_failures:
+            with st.expander(f"⚠️ {len(history_failures)} region(s) had history-fetch issues", expanded=False):
+                for oblast_en, reason in sorted(history_failures.items()):
+                    st.caption(f"**{oblast_en}** — {reason}")
 
         st.divider()
 
@@ -805,8 +839,8 @@ def render_kpi_row(
         active_count: Live active alert count from API.
     """
     now = datetime.now(timezone.utc)
-    cutoff_current = pd.Timestamp(now - timedelta(days=days_range), tz="UTC")
-    cutoff_previous = pd.Timestamp(now - timedelta(days=days_range * 2), tz="UTC")
+    cutoff_current = pd.Timestamp(now - timedelta(days=days_range))
+    cutoff_previous = pd.Timestamp(now - timedelta(days=days_range * 2))
 
     oblast_df = df[df["location_type"] == "oblast"].copy()
     current = oblast_df[oblast_df["started_at"] >= cutoff_current]
@@ -886,7 +920,7 @@ def render_history_tab(
     """
     # Apply time filter
     now = datetime.now(timezone.utc)
-    cutoff = pd.Timestamp(now - timedelta(days=days_range), tz="UTC")
+    cutoff = pd.Timestamp(now - timedelta(days=days_range))
     df_filtered = df[df["started_at"] >= cutoff].copy()
 
     # Apply oblast filter
@@ -1008,9 +1042,24 @@ def render_forecast_tab(
     series = prepare_series_for_region(daily_df, region_name=oblast_label)
 
     if series.empty or len(series) < 3:
+        if series.empty:
+            reason = (
+                "No date range could be established at all for this region — "
+                "this usually means the overall dataset itself is empty."
+            )
+        else:
+            reason = (
+                f"Only {len(series)} day(s) of history are available for "
+                f"**{oblast_label}** so far (need at least 3)."
+            )
         st.warning(
             f"Insufficient historical data for **{oblast_label}** to generate a forecast. "
-            "Try enabling '30-day history' in the sidebar or selecting a different region."
+            f"{reason}\n\n"
+            "Try enabling **'Fetch 30-day history'** in the sidebar, waiting for more data to "
+            "accumulate, or selecting a different region. If you've already enabled history "
+            "fetch, check the **⚠️ region(s) had history-fetch issues** expander in the "
+            "sidebar — that region's fetch may have failed silently (e.g. rate limit or "
+            "transient API error)."
         )
         return
 
@@ -1216,6 +1265,7 @@ def main() -> None:
         api_ok=api_status["api_ok"],
         last_updated=api_status.get("last_updated"),
         active_count=api_status.get("active_count", 0),
+        history_failures=api_status.get("history_failures", {}),
     )
 
     if df.empty:

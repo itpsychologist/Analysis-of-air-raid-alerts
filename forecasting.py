@@ -237,6 +237,29 @@ def train_and_forecast(
     n = len(series)
     logger.info("Forecasting %d days ahead from %d historical data points.", horizon, n)
 
+    # Degenerate case: a constant series (most commonly all zeros, e.g. a
+    # region with no recorded alerts in the window) makes Holt-Winters'
+    # internal AIC/BIC computation take log(0) and produces noisy warnings
+    # for a forecast that is trivially "more of the same constant value"
+    # anyway. Short-circuit with a flat forecast and zero-width CI rather
+    # than feeding a zero-variance series into either model.
+    if series.nunique() == 1:
+        constant_value = float(series.iloc[0])
+        last_date = series.index[-1]
+        future_dates = pd.date_range(
+            start=last_date + pd.Timedelta(days=1),
+            periods=horizon,
+            freq="D",
+            tz="UTC",
+        )
+        return pd.DataFrame({
+            "date": future_dates,
+            "forecast": [round(constant_value, 2)] * horizon,
+            "ci_lower": [round(constant_value, 2)] * horizon,
+            "ci_upper": [round(constant_value, 2)] * horizon,
+            "model": "Constant (no variance in history)",
+        })
+
     # Try primary model first; fall back gracefully
     if n >= 14:
         try:

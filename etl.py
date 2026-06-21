@@ -58,7 +58,7 @@ OBLAST_UID_MAP: dict[str, str] = {
 OBLAST_EN_MAP: dict[str, str] = {
     "Вінницька область": "Vinnytsia",
     "Волинська область": "Volyn",
-    "Дніпропетровська область": "Dnipropetrovsk",
+    "Дніпропетровська область": "Dnipro",
     "Донецька область": "Donetsk",
     "Житомирська область": "Zhytomyr",
     "Закарпатська область": "Zakarpattia",
@@ -365,7 +365,13 @@ def fetch_and_process_data(
     """
     now = datetime.now(timezone.utc)
     all_records: list[dict] = []
-    status: dict = {"api_ok": False, "active_count": 0, "last_updated": now, "error": None}
+    status: dict = {
+        "api_ok": False,
+        "active_count": 0,
+        "last_updated": now,
+        "error": None,
+        "history_failures": {},  # oblast_en -> error message, for regions whose history fetch failed
+    }
 
     # ── Step 1: Fetch active alerts ──────────────────────────────────────────
     try:
@@ -388,6 +394,13 @@ def fetch_and_process_data(
                 progress_callback(idx + 1, total, f"Loading {OBLAST_EN_MAP.get(oblast_name, oblast_name)}…")
             try:
                 history_raw = fetch_oblast_history(api_token, uid, history_period)
+                if not history_raw:
+                    # Empty response is not necessarily an error (region may simply
+                    # have had zero alerts), but we still note it for diagnostics.
+                    status["history_failures"].setdefault(
+                        OBLAST_EN_MAP.get(oblast_name, oblast_name),
+                        "No records returned (may be genuinely zero alerts, or a silent API issue).",
+                    )
                 for record in history_raw:
                     # Skip records already in active set (avoid duplicates)
                     normalized = _normalize_alert_record(record, now)
@@ -399,6 +412,7 @@ def fetch_and_process_data(
                 logger.warning(
                     "Skipping history for %s (uid=%s): %s", oblast_name, uid, exc
                 )
+                status["history_failures"][OBLAST_EN_MAP.get(oblast_name, oblast_name)] = str(exc)
                 continue
 
     # ── Step 3: Build DataFrame ───────────────────────────────────────────────
@@ -471,12 +485,38 @@ def compute_daily_counts(
     daily["date"] = pd.to_datetime(daily["date"])
     daily = daily.sort_values("date")
 
-    # Fill missing dates with zero counts for clean time-series
+    # Determine the date range to gap-fill against. Prefer the filtered
+    # data's own range; but if the oblast filter produced ZERO rows (a
+    # genuinely quiet region), fall back to the full unfiltered dataset's
+    # range so we still return a proper all-zero daily series instead of an
+    # empty frame. An empty frame here silently propagates downstream into
+    # prepare_series_for_region() -> an empty pd.Series -> a misleading
+    # "insufficient historical data" message, even when the real story is
+    # "this region simply had 0 alerts in the window".
     if not daily.empty:
-        full_range = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
-        daily = daily.set_index("date").reindex(full_range, fill_value=0).reset_index()
+        range_start, range_end = daily["date"].min(), daily["date"].max()
+    elif not df.empty and "date" in df.columns:
+        full_dates = pd.to_datetime(df["date"])
+        range_start, range_end = full_dates.min(), full_dates.max()
+    else:
+        range_start, range_end = None, None
+
+    if range_start is not None and range_end is not None:
+        full_range = pd.date_range(range_start, range_end, freq="D")
+        daily = (
+            daily.set_index("date")
+            .reindex(full_range, fill_value=0)
+            .reset_index()
+        )
         daily.columns = ["date", "count", "avg_duration_minutes", "total_duration_minutes"]
         daily["rolling_7d_avg"] = daily["count"].rolling(window=7, min_periods=1).mean()
+    else:
+        # Truly no data anywhere (e.g. df itself is empty) — return a
+        # well-formed empty frame with the expected columns rather than a
+        # bare DataFrame() that's missing 'rolling_7d_avg'.
+        daily = pd.DataFrame(
+            columns=["date", "count", "avg_duration_minutes", "total_duration_minutes", "rolling_7d_avg"]
+        )
 
     return daily
 
