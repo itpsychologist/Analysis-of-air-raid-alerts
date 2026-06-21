@@ -580,7 +580,7 @@ def make_forecast_chart(
 
     # Vertical divider between historical and forecast
     if not forecast_df.empty and not daily_df.empty:
-        boundary = forecast_df["date"].iloc[0]
+        boundary = forecast_df["date"].iloc[0].isoformat()
         fig.add_vline(
             x=boundary,
             line_dash="dash",
