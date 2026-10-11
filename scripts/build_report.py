@@ -80,7 +80,7 @@ def table_a(res: Results, h: int) -> str:
             "Model": charts.model_label(m),
             "Cells": f"{int(s.at[m, 'n']):,}",
             "Brier": fmt(s.at[m, "brier"], 4),
-            f"BSS vs raion rate [95% CI]": fmt(s.at[m, "bss"], signed=True) + ci,
+            "BSS vs raion rate [95% CI]": fmt(s.at[m, "bss"], signed=True) + ci,
             "ROC-AUC": fmt(s.at[m, "roc_auc"]),
             "AUC within raion": fmt(s.at[m, "roc_auc_within"]),
             "PR-AUC": fmt(s.at[m, "pr_auc"]),
@@ -178,8 +178,8 @@ nav a,a{color:var(--accent)}
 .kpi-sub{font-size:.8rem;color:var(--muted);line-height:1.4}
 .chart{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px;margin:14px 0;
 min-width:0}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
-.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}
 .table-wrap{overflow-x:auto;margin:10px 0;border:1px solid var(--border);border-radius:10px}
 table{border-collapse:collapse;width:100%;font-size:.86rem;font-variant-numeric:tabular-nums}
 th,td{padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}
@@ -243,6 +243,8 @@ def build_html(res: Results, plotly_js: str, generated_at: str) -> str:
             text_note += f"; {b['skill']:+.3f} [{b['ci_low']:+.3f}, {b['ci_high']:+.3f}] at h = {h} h"
         text_note += " (positive = text helps)."
 
+    windows = ", ".join(f"h = {h} h: {c['lgbm']['window_days']} days"
+                        for h, c in res.config.get("horizons", {}).items()) or "see model_config.json"
     hw = daily_skill(res, "count", 1, "holt_winters", "mean_28d", "mae")
     lg = daily_skill(res, "count", 1, "lgbm", "mean_28d", "mae")
     lgd = daily_skill(res, "count", 1, "lgbm", "mean_28d", "poisson_dev")
@@ -255,6 +257,8 @@ def build_html(res: Results, plotly_js: str, generated_at: str) -> str:
 <p>Alert intervals per raion (118 raions + Kyiv City) from the
 <a href="https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset">official sirens dataset</a> (2022 → 06 Sep 2026)
 and the <a href="https://alerts.in.ua">alerts.in.ua</a> API (12 Sep → 11 Oct 2026), stitched by time and never mixed.
+A 105-hour stretch with no alert start anywhere in the official feed (29 Aug – 2 Sep 2026; the longest real
+national lull since 2022 is 30 h) is a source outage. It is treated as missing data, not as "no alerts".
 Oblast-level alerts (the norm until December 2025) are spread to every raion of the oblast;
 Luhansk oblast (permanent alert) is excluded.</p>
 {F(charts.make_history_chart(ov["daily"], th), "history")}
@@ -335,11 +339,15 @@ Marker size grows with the number of cases.</p>
 </div>
 
 <h2 id="daily">7. Daily alert count and duration, 1–7 days ahead</h2>
-<p>MASE below 1 means better than "same day last week". Scored on the cells where every model, including
-Holt-Winters, has a forecast. Holt-Winters needs 3 covered days before the origin, so the first test days are
-missing. At one day ahead, LightGBM vs the 28-day mean: MAE skill {ci_text(lg)}, Poisson deviance skill
-{ci_text(lgd)}; Holt-Winters vs the 28-day mean: MAE skill {ci_text(hw)}.</p>
+<p>On the daily scale the simple 28-day mean is the forecast to beat, and on the test month no model beat it.
+The upper charts use every test day (27 Kyiv days × 119 raions), with MAE relative to the 28-day mean, where
+above 1 is worse. At one day ahead: LightGBM {ci_text(lg)} (MAE skill), Poisson deviance skill {ci_text(lgd)};
+the dashboard's Holt-Winters {ci_text(hw)}. Its errors grow quickly with the horizon.
+The tables and lower charts use the days where every forecast exists (from 20 Sep: "same day last week"
+and Holt-Winters need data after the gap), as MASE vs "same day last week"; below 1 is better.</p>
 <div class="grid2">
+{F(charts.make_mase_chart(res.daily, "count", "rel_mae", "all_days", th), "rel-count")}
+{F(charts.make_mase_chart(res.daily, "duration", "rel_mae", "all_days", th), "rel-duration")}
 {F(charts.make_mase_chart(res.daily, "count", "rel_mae", "common", th), "mase-count")}
 {F(charts.make_mase_chart(res.daily, "duration", "rel_mae", "common", th), "mase-duration")}
 </div>
@@ -358,9 +366,12 @@ missing. At one day ahead, LightGBM vs the 28-day mean: MAE skill {ci_text(lg)},
 <li><b>One test month.</b> 28 days of one season. Attack intensity changes month to month (see the folds column),
 so the test is one draw, not a guarantee.</li>
 <li><b>Regime change.</b> Tactics and the alert system itself change. Raion-level alerts became the norm in
-December 2025. Training windows longer than 180 days made the models worse.</li>
-<li><b>Data gap.</b> The official dataset ends on 06 Sep 2026 and the API history starts on 12 Sep, so features with
-7–28-day windows are partly missing on the first test days.</li>
+December 2025. The training window is a tuned setting ({windows}), so old history is either used whole or
+dropped.</li>
+<li><b>Data gaps.</b> The official dataset ends on 06 Sep 2026 and the API history starts on 12 Sep, so features with
+7–28-day windows are partly missing on the first test days. "Same hour last week" is scored only from 19 Sep.
+The official feed also has a 4-day outage (29 Aug – 2 Sep), masked as missing. Outages limited to one oblast would
+not be detected by the national rule.</li>
 <li><b>Rare raions.</b> In western oblasts with almost no alerts, the shared model can be worse than the raion's own
 rate.</li>
 <li><b>Mass attacks</b> are hard to foresee from alert history alone. Public channel posts did not add skill at hourly

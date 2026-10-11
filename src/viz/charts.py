@@ -656,16 +656,19 @@ def make_mase_chart(daily_scores: pd.DataFrame, target: str = "count", metric: s
     d = daily_scores[(daily_scores["target"] == target) & (daily_scores["cells"] == cells)]
     fig = go.Figure()
     for m in ["lgbm", "poisson_glm", "holt_winters", "mean_28d", "mean_7d", "last_day", "seasonal_naive"]:
+        if cells == "all_days" and m == "seasonal_naive":
+            continue  # defined only from 20 Sep; its row is in the "common" chart
         g = d[d["model"] == m].sort_values("k")
         if g.empty:
             continue
         fig.add_trace(go.Scatter(x=g["k"], y=g[metric], name=model_label(m), mode="lines+markers",
                                  line=dict(color=model_colour(m), dash="solid" if m in MODEL_COLOURS else "dot")))
-    what = "alert count" if target == "count" else "hours under alert"
-    rel = "MASE (vs same day last week)" if cells == "common" else "MAE relative to the 28-day mean"
+    what = "Alert count" if target == "count" else "Hours under alert"
+    rel = "MASE vs same day last week" if cells == "common" else "MAE / MAE of 28-day mean, all days"
     label = {"rel_mae": rel, "poisson_dev": "Poisson deviance", "mae": "MAE"}[metric]
-    return _style(fig, theme, f"Daily {what} per raion: {label}", height=400,
-                  xaxis=dict(title="Horizon, days", dtick=1), yaxis_title=label + " (lower is better)")
+    return _style(fig, theme, f"{what}: {label}", height=440, legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
+                  margin=dict(l=10, r=10, t=50, b=10), 
+                  xaxis=dict(title="Horizon, days", dtick=1), yaxis_title="lower is better")
 
 
 def make_coverage_chart(intervals: pd.DataFrame, target: str = "count", theme: str = "dark") -> go.Figure:
@@ -674,7 +677,7 @@ def make_coverage_chart(intervals: pd.DataFrame, target: str = "count", theme: s
     fig = go.Figure()
     for level, dash in ((80, "dot"), (95, "solid")):
         fig.add_hline(y=level / 100, line=dict(color=NEUTRAL_COLOUR, dash="dash", width=1),
-                      annotation_text=f"nominal {level}%", annotation_position="right")
+                      annotation_text=f"nominal {level}%", annotation_position="top left")
         for m in ("lgbm_quantile", "lgbm_conformal", "holt_winters"):
             g = iv[(iv["model"] == m) & (iv["level"] == level)].sort_values("k")
             if g.empty:
@@ -684,7 +687,8 @@ def make_coverage_chart(intervals: pd.DataFrame, target: str = "count", theme: s
                                      customdata=g["width"], hovertemplate="coverage %{y:.3f}, mean width "
                                      "%{customdata:.2f}<extra></extra>"))
     what = "alert count" if target == "count" else "hours under alert"
-    return _style(fig, theme, f"Interval coverage, daily {what}", height=400,
+    return _style(fig, theme, f"Interval coverage, daily {what}", height=480, legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
+                  margin=dict(l=10, r=10, t=50, b=10), 
                   xaxis=dict(title="Horizon, days", dtick=1), yaxis=dict(title="Empirical coverage"))
 
 
@@ -698,7 +702,7 @@ def make_history_chart(overview: pd.DataFrame, theme: str = "dark") -> go.Figure
     fig.add_trace(go.Scatter(x=o["day"], y=o["hours_per_raion"].rolling(28, min_periods=14).mean(),
                              name="28-day average", mode="lines", line=dict(color=COLOUR_PRIMARY, width=2),
                              hovertemplate="%{x|%d %b %Y}: %{y:.1f} h<extra>28-day avg</extra>"))
-    return _style(fig, theme, "How much of the day a raion spends under alert, 2022–2026", height=400,
+    return _style(fig, theme, "Hours under alert per raion per day", height=400,
                   yaxis_title="Hours per raion per day", bargap=0, hovermode="x unified")
 
 

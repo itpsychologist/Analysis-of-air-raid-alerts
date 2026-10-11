@@ -34,6 +34,7 @@ class Results:
     backtest: pd.DataFrame  # folds + validation (stages 2-4), for comparison
     backtest_daily: pd.DataFrame
     overview: dict[str, pd.DataFrame | list]
+    config: dict  # model_config.json (selected settings), {} if absent
 
 
 def load_results(results_dir: Path = RESULTS_DIR) -> Results | None:
@@ -58,6 +59,8 @@ def load_results(results_dir: Path = RESULTS_DIR) -> Results | None:
         backtest=csv("backtest"),
         backtest_daily=csv("backtest_daily"),
         overview=load_overview(d),
+        config=json.loads((d / "model_config.json").read_text(encoding="utf-8"))
+        if (d / "model_config.json").exists() else {},
     )
 
 

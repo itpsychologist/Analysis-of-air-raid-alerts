@@ -1,0 +1,59 @@
+{
+  "status": "complete",
+  "rehearsal": false,
+  "scored_at": "2026-10-11T17:27:54+00:00",
+  "git_commit": "e4f649462c43221e3d9bd90da1d215fb6f595b97",
+  "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "snapshots": {
+    "official_data_uk": "20261011T100347Z_bf0c323c78e3.csv.gz",
+    "alerts_in_ua": "20261011T100646Z"
+  },
+  "test_window_utc": [
+    "2026-09-13T10:00:00+00:00",
+    "2026-10-11T10:00:00+00:00"
+  ],
+  "sha256": {
+    "model_config.json": "63689f5ff6b7bf52a5846d14d131aa4705a67304a86482f1fe66785b64ee5e6b",
+    "model_config_daily.json": "7a4b392a8011bb68e84b3c01fd2cea47cb3625bc39a314435d4e166d59863e78",
+    "telegram_snapshot": "e0890fc52aa02ebff1653982bf61a3acd5396d8825208559fb99f24e7da53eca",
+    "src/features/text.py": "178feb36fb83e1c7cf01129e425f589692ab07ccda74b1f1e0d1bb56511aeda7",
+    "src/data/telegram.py": "a5f14034ca31de9571be38b387614fca8f8e7ccbfeafdebe2ff1ee65708e2be0"
+  },
+  "text_ablation": true,
+  "coverage_windows_sha256": "689cf266f1e1bdf7ae23440357463690b0e1856362b76dc2ac44d7c723bd1a3b",
+  "test_period_outages": [],
+  "reruns": [],
+  "completed_at": "2026-10-11T17:30:34+00:00",
+  "origins_by_h": {
+    "1": [
+      "2026-09-13 10:00:00+00:00",
+      "2026-10-11 10:00:00+00:00"
+    ],
+    "3": [
+      "2026-09-13 10:00:00+00:00",
+      "2026-10-11 08:00:00+00:00"
+    ],
+    "6": [
+      "2026-09-13 10:00:00+00:00",
+      "2026-10-11 05:00:00+00:00"
+    ]
+  },
+  "scored_cells_by_h": {
+    "1": [
+      79968,
+      79968
+    ],
+    "3": [
+      79730,
+      79730
+    ],
+    "6": [
+      79373,
+      79373
+    ]
+  },
+  "test_days_kyiv": [
+    "2026-09-14",
+    "2026-10-11"
+  ]
+}

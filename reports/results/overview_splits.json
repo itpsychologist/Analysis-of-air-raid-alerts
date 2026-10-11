@@ -1,0 +1,44 @@
+[
+  {
+    "label": "training (window \u2264 180 d)",
+    "start": "2026-02-02 04:00:00+00:00",
+    "end": "2026-06-19 22:00:00+00:00",
+    "kind": "train",
+    "row": "model selection"
+  },
+  {
+    "label": "6 weekly folds",
+    "start": "2026-06-19 22:00:00+00:00",
+    "end": "2026-08-01 03:00:00+00:00",
+    "kind": "fold",
+    "row": "model selection"
+  },
+  {
+    "label": "validation",
+    "start": "2026-08-01 04:00:00+00:00",
+    "end": "2026-08-29 04:00:00+00:00",
+    "kind": "validation",
+    "row": "model selection"
+  },
+  {
+    "label": "training (incl. validation)",
+    "start": "2026-03-17 10:00:00+00:00",
+    "end": "2026-08-29 04:00:00+00:00",
+    "kind": "train",
+    "row": "final test"
+  },
+  {
+    "label": "no data",
+    "start": "2026-09-06 05:28:22+00:00",
+    "end": "2026-09-12 00:00:00+00:00",
+    "kind": "gap",
+    "row": "final test"
+  },
+  {
+    "label": "final test",
+    "start": "2026-09-13 10:00:00+00:00",
+    "end": "2026-10-11 10:00:00+00:00",
+    "kind": "test",
+    "row": "final test"
+  }
+]

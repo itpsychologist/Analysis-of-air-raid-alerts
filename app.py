@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -51,7 +50,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 from etl import (
     OBLAST_EN_MAP,
-    ALERT_TYPE_EN_MAP,
     compute_daily_counts,
     mean_finished_duration,
     compute_heatmap_data,
@@ -61,7 +59,6 @@ from etl import (
 from forecasting import (
     prepare_series_for_region,
     train_and_forecast,
-    compute_national_forecast,
     compute_risk_forecast_score,
 )
 from src.viz.charts import (
