@@ -67,3 +67,42 @@ def calibration_table(y: np.ndarray, p: np.ndarray, bins: int = 10) -> pd.DataFr
     idx = np.clip(np.digitize(p, edges[1:-1]), 0, bins - 1)
     df = pd.DataFrame({"bin": idx, "p": p, "y": y})
     return df.groupby("bin").agg(mean_forecast=("p", "mean"), observed=("y", "mean"), n=("y", "size"))
+
+
+# ---------------------------------------------------------------------------
+# Target B: counts / durations (PLAN.md, section 4.3)
+# ---------------------------------------------------------------------------
+
+def poisson_deviance(y: np.ndarray, mu: np.ndarray, eps: float = 1e-6) -> float:
+    """Mean Poisson deviance; works for non-integer y >= 0 (durations) too."""
+    mu = np.maximum(mu, eps)
+    term = np.where(y > 0, y * np.log(np.where(y > 0, y, 1) / mu), 0.0)
+    return float(np.mean(2 * (term - (y - mu))))
+
+
+def regression_scores(y: np.ndarray, p: np.ndarray, reference_mae: float | None = None) -> dict[str, float]:
+    """
+    MAE, RMSE, bias, Poisson deviance; `mase` is MAE relative to the seasonal naive
+    forecast's MAE on the same cells (pass it as `reference_mae`).
+    """
+    out = {
+        "n": int(len(y)),
+        "mean_y": float(np.mean(y)),
+        "mae": float(np.mean(np.abs(p - y))),
+        "rmse": float(np.sqrt(np.mean((p - y) ** 2))),
+        "bias": float(np.mean(p - y)),
+        "poisson_dev": poisson_deviance(y, p),
+    }
+    if reference_mae is not None:
+        out["mase"] = out["mae"] / reference_mae
+    return out
+
+
+def pinball(y: np.ndarray, q: np.ndarray, alpha: float) -> float:
+    d = y - q
+    return float(np.mean(np.maximum(alpha * d, (alpha - 1) * d)))
+
+
+def interval_scores(y: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> dict[str, float]:
+    """Empirical coverage and mean width of a central interval."""
+    return {"coverage": float(np.mean((y >= lower) & (y <= upper))), "width": float(np.mean(upper - lower))}

@@ -38,6 +38,23 @@ def make_logit(C: float = 1.0):
     )
 
 
+def _signed_log1p(x):
+    return np.sign(x) * np.log1p(np.abs(x))
+
+
+def make_poisson_glm(alpha: float = 1e-3):
+    """Poisson GLM (log link) for target B; counts/durations are log-compressed first."""
+    from sklearn.linear_model import PoissonRegressor
+    from sklearn.preprocessing import FunctionTransformer
+
+    return make_pipeline(
+        SimpleImputer(strategy="median", add_indicator=True),
+        FunctionTransformer(_signed_log1p),
+        StandardScaler(),
+        PoissonRegressor(alpha=alpha, max_iter=1000),
+    )
+
+
 @dataclass
 class LGBMSpec:
     """
@@ -62,9 +79,12 @@ class LGBMSpec:
     n_estimators: int = 1000
 
     def make(self, n_estimators: int | None = None, **overrides):
-        from lightgbm import LGBMClassifier
+        """A classifier for the binary objective, a regressor otherwise (poisson, quantile, ...)."""
+        from lightgbm import LGBMClassifier, LGBMRegressor
 
-        return LGBMClassifier(n_estimators=n_estimators or self.n_estimators, **(self.params | overrides))
+        params = self.params | overrides
+        cls = LGBMClassifier if params["objective"] == "binary" else LGBMRegressor
+        return cls(n_estimators=n_estimators or self.n_estimators, **params)
 
 
 def fit_lgbm_early_stopping(spec: LGBMSpec, X: pd.DataFrame, y: np.ndarray,
@@ -73,13 +93,17 @@ def fit_lgbm_early_stopping(spec: LGBMSpec, X: pd.DataFrame, y: np.ndarray,
     import lightgbm
 
     model = spec.make(**overrides)
-    model.fit(X, y, eval_set=[(X_val, y_val)], eval_metric="binary_logloss",
+    metric = "binary_logloss" if (spec.params | overrides)["objective"] == "binary" else "poisson"
+    model.fit(X, y, eval_set=[(X_val, y_val)], eval_metric=metric,
               callbacks=[lightgbm.early_stopping(patience, verbose=False)])
     return model, int(model.best_iteration_ or spec.n_estimators)
 
 
 def predict(model, X: pd.DataFrame) -> np.ndarray:
-    return model.predict_proba(X)[:, 1]
+    """Probability of the positive class (classifiers) or the predicted value (regressors)."""
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(X)[:, 1]
+    return model.predict(X)
 
 
 def to_wide(p: np.ndarray, index: pd.MultiIndex, like: pd.DataFrame) -> pd.DataFrame:

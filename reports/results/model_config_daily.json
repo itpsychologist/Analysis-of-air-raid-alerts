@@ -1,0 +1,170 @@
+{
+  "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "reference": "seasonal_naive",
+  "lgbm_params": {
+    "objective": "poisson",
+    "learning_rate": 0.05,
+    "num_leaves": 15,
+    "min_child_samples": 200,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "random_state": 0,
+    "deterministic": true,
+    "force_row_wise": true,
+    "verbose": -1
+  },
+  "quantiles": [
+    0.025,
+    0.1,
+    0.9,
+    0.975
+  ],
+  "targets": {
+    "count": {
+      "1": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 180,
+          "num_leaves": 7,
+          "n_estimators": 282
+        }
+      },
+      "2": {
+        "poisson_glm": {
+          "window_days": 180
+        },
+        "lgbm": {
+          "window_days": 90,
+          "num_leaves": 15,
+          "n_estimators": 359
+        }
+      },
+      "3": {
+        "poisson_glm": {
+          "window_days": 180
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 573
+        }
+      },
+      "4": {
+        "poisson_glm": {
+          "window_days": 180
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 177
+        }
+      },
+      "5": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 246
+        }
+      },
+      "6": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 266
+        }
+      },
+      "7": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 7,
+          "n_estimators": 338
+        }
+      }
+    },
+    "duration": {
+      "1": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 180,
+          "num_leaves": 7,
+          "n_estimators": 723
+        }
+      },
+      "2": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 7,
+          "n_estimators": 848
+        }
+      },
+      "3": {
+        "poisson_glm": {
+          "window_days": 180
+        },
+        "lgbm": {
+          "window_days": 90,
+          "num_leaves": 15,
+          "n_estimators": 214
+        }
+      },
+      "4": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 237
+        }
+      },
+      "5": {
+        "poisson_glm": {
+          "window_days": 365
+        },
+        "lgbm": {
+          "window_days": 365,
+          "num_leaves": 15,
+          "n_estimators": 194
+        }
+      },
+      "6": {
+        "poisson_glm": {
+          "window_days": 180
+        },
+        "lgbm": {
+          "window_days": 90,
+          "num_leaves": 7,
+          "n_estimators": 534
+        }
+      },
+      "7": {
+        "poisson_glm": {
+          "window_days": 90
+        },
+        "lgbm": {
+          "window_days": 180,
+          "num_leaves": 15,
+          "n_estimators": 276
+        }
+      }
+    }
+  }
+}
