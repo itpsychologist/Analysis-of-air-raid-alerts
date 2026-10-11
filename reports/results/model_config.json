@@ -24,6 +24,14 @@
         "window_days": 180,
         "num_leaves": 7,
         "n_estimators": 213
+      },
+      "logit_text": {
+        "window_days": 180
+      },
+      "lgbm_text": {
+        "window_days": 180,
+        "num_leaves": 7,
+        "n_estimators": 131
       }
     },
     "3": {
@@ -34,6 +42,14 @@
         "window_days": 90,
         "num_leaves": 7,
         "n_estimators": 223
+      },
+      "logit_text": {
+        "window_days": 180
+      },
+      "lgbm_text": {
+        "window_days": 60,
+        "num_leaves": 7,
+        "n_estimators": 155
       }
     },
     "6": {
@@ -44,7 +60,19 @@
         "window_days": 90,
         "num_leaves": 7,
         "n_estimators": 198
+      },
+      "logit_text": {
+        "window_days": 180
+      },
+      "lgbm_text": {
+        "window_days": 90,
+        "num_leaves": 7,
+        "n_estimators": 177
       }
     }
+  },
+  "text": {
+    "snapshot": "20261011T113920Z.jsonl.gz",
+    "text_py_sha256": "178feb36fb83e1c7cf01129e425f589692ab07ccda74b1f1e0d1bb56511aeda7"
   }
 }

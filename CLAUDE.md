@@ -16,8 +16,9 @@ uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .
 .venv/bin/python -m pytest                      # all tests (pytest.ini sets pythonpath)
 .venv/bin/python -m pytest tests/test_merge.py::test_open_alert_is_closed_at_cutoff_not_later   # single test
 .venv/bin/python scripts/fetch_data.py [--api]  # new raw snapshots; --api takes ~13 min (rate limit)
+.venv/bin/python scripts/fetch_telegram.py --since 2025-11-01  # Air Force channel posts from t.me/s preview (~1.5 h, resumable)
 .venv/bin/python scripts/build_dataset.py       # data/raw -> data/processed
-.venv/bin/python scripts/run_backtest.py        # target A: select + fit models, score vs baselines on folds + validation -> reports/results/ (~5 min)
+.venv/bin/python scripts/run_backtest.py [--no-text]  # target A: select + fit models (+ *_text ablation if a Telegram snapshot exists), score vs baselines on folds + validation -> reports/results/ (~15 min)
 .venv/bin/python scripts/run_backtest_daily.py  # target B (daily count / hours per raion, k = 1..7 days), same protocol (~10 min)
 ```
 
@@ -53,11 +54,12 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
 - `features/panel.py`: wide hourly matrices (UTC hours × units): `starts`, `active_minutes`, `covered`, `active_at` (under alert at the instant t). Target A `labels(panel, h)`: 1 if a new alert starts in [t, t+h), NaN if the window touches an uncovered hour. The label of origin t is only known at t + h — anything used as input at t may only read labels with t' + h <= t.
 - `evaluation/splits.py`: final test = last 28 days (scored **once**, at the end of the project; `run_backtest.py` must not score it), validation = 28 days before the data gap, 6 weekly rolling folds; embargo = h (`Split.train_end`).
 - `features/asof.py`: features as of origin t (row t reads only hours < t, `active_at[t]`, labels with t' + h <= t via the baselines, and the Kyiv calendar). Unit history, same-oblast / neighbouring-oblast (`features/geo.py`, hand-written adjacency) / country aggregates. `stack` turns wide features into the long (origin, unit) design matrix.
+- `features/text.py` (stage 4): Air Force posts (`data/telegram.py`, `data/raw/telegram/kpszsu/*.jsonl.gz`) tagged by regex (threat categories, oblast/city mentions incl. oblique cases, launched counts from the "противник атакував" sentence). Hourly by UTC publication hour; row t sees posts with date_utc < t. Edited posts are kept but their content is NaN (dropping them would depend on edits after t). The tagging rules are frozen for the final test (sha256 in `model_config.json`) — don't edit `text.py` before the holdout run. Text did not improve target A.
 - `models/tabular.py`: logistic regression and LightGBM, fit per split on `train_rows` (origins < `train_end(h)` within a window of days); Platt/isotonic calibrators. `run_backtest.py` selects the training window and tree settings on validation only (so validation scores of models are optimistic; folds reuse those later-chosen settings too, so only the final test is unbiased) and writes `model_config.json` for the final-test run.
 - `features/daily.py`: target B on Kyiv-local days (23/25-hour DST days handled; a day is covered only if all its hours are). Origin = Kyiv midnight of day d; `for_horizon(F, daily, k)` puts features of origin D-k+1 on target day D; `DaySplit.train_end(k)`: training target days <= split start - k. `make_daily_splits` uses the same frozen test window (whole Kyiv days only).
 - `models/baselines.py`: reference forecasts on the label matrix (target A) and daily baselines incl. the dashboard's Holt-Winters refit per origin (target B). Shifts are in rows, so they require a regular hourly index; never group by Kyiv local hour (DST makes "previous same hour" 1 h away).
 - `evaluation/metrics.py`: Brier/BSS, log loss, ROC-AUC, PR-AUC and `within_unit_auc` — pooled AUC is dominated by frontline-vs-west differences; within-unit AUC measures timing skill.
-- `tests/test_leakage.py` and `tests/test_features.py` hold the future-perturbation tests; any new feature or model needs one (`test_features.py` rewrites raw intervals after t and checks every feature at t).
+- `tests/test_leakage.py`, `tests/test_features.py`, `tests/test_daily.py` and `tests/test_text.py` hold the future-perturbation tests; any new feature or model needs one (`test_features.py` rewrites raw intervals after t and checks every feature at t).
 
 Open alerts are closed at the data cutoff (`open_until`), never at "now", to avoid leakage.
 
