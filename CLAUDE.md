@@ -37,3 +37,9 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
 - Active alerts: ~8–12 req/min.
 - Per-region history: **2 req/min**. `fetch_and_process_data` sleeps 31 s between oblast requests, so a full history load (~25 oblasts) takes ~13 minutes. Never remove the delay or parallelise these calls, or the token risks being blacklisted.
 - Turning off "Fetch 30-day history" in the sidebar loads only active alerts, which is instant. Use this while iterating on the UI.
+
+## Project tooling (`.claude/`)
+
+- `PLAN.md` is the implementation plan (in Ukrainian) for the forecasting project; section 3 defines the no-leakage rules.
+- Subagent `leakage-auditor`: read-only review for temporal data leakage. Run it after changing features, splits, evaluation or text features, and before the final holdout evaluation.
+- A PreToolUse hook (`.claude/hooks/block_secret_commit.py`) blocks `git commit` when the commit would include `.streamlit/secrets.toml`, `.env`, or the token value.

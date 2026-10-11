@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(pip install -r requirements.txt)",
+      "Bash(streamlit run *)"
+    ],
+    "deny": [
+      "Read(.streamlit/secrets.toml)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_secret_commit.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking commit for secrets"
+          }
+        ]
+      }
+    ]
+  }
+}
