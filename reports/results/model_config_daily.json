@@ -1,5 +1,6 @@
 {
   "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "coverage_windows_sha256": "689cf266f1e1bdf7ae23440357463690b0e1856362b76dc2ac44d7c723bd1a3b",
   "reference": "seasonal_naive",
   "lgbm_params": {
     "objective": "poisson",
@@ -29,8 +30,8 @@
         },
         "lgbm": {
           "window_days": 180,
-          "num_leaves": 7,
-          "n_estimators": 282
+          "num_leaves": 15,
+          "n_estimators": 240
         }
       },
       "2": {
@@ -38,9 +39,9 @@
           "window_days": 180
         },
         "lgbm": {
-          "window_days": 90,
-          "num_leaves": 15,
-          "n_estimators": 359
+          "window_days": 365,
+          "num_leaves": 7,
+          "n_estimators": 398
         }
       },
       "3": {
@@ -49,18 +50,18 @@
         },
         "lgbm": {
           "window_days": 365,
-          "num_leaves": 15,
-          "n_estimators": 573
+          "num_leaves": 7,
+          "n_estimators": 410
         }
       },
       "4": {
         "poisson_glm": {
-          "window_days": 180
+          "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
+          "window_days": 180,
           "num_leaves": 15,
-          "n_estimators": 177
+          "n_estimators": 157
         }
       },
       "5": {
@@ -68,9 +69,9 @@
           "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
-          "num_leaves": 15,
-          "n_estimators": 246
+          "window_days": 90,
+          "num_leaves": 7,
+          "n_estimators": 158
         }
       },
       "6": {
@@ -78,9 +79,9 @@
           "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
-          "num_leaves": 15,
-          "n_estimators": 266
+          "window_days": 90,
+          "num_leaves": 7,
+          "n_estimators": 181
         }
       },
       "7": {
@@ -88,9 +89,9 @@
           "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
+          "window_days": 90,
           "num_leaves": 7,
-          "n_estimators": 338
+          "n_estimators": 213
         }
       }
     },
@@ -101,18 +102,18 @@
         },
         "lgbm": {
           "window_days": 180,
-          "num_leaves": 7,
-          "n_estimators": 723
+          "num_leaves": 15,
+          "n_estimators": 538
         }
       },
       "2": {
         "poisson_glm": {
-          "window_days": 365
+          "window_days": 180
         },
         "lgbm": {
           "window_days": 365,
           "num_leaves": 7,
-          "n_estimators": 848
+          "n_estimators": 1000
         }
       },
       "3": {
@@ -120,9 +121,9 @@
           "window_days": 180
         },
         "lgbm": {
-          "window_days": 90,
-          "num_leaves": 15,
-          "n_estimators": 214
+          "window_days": 180,
+          "num_leaves": 7,
+          "n_estimators": 308
         }
       },
       "4": {
@@ -130,9 +131,9 @@
           "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
-          "num_leaves": 15,
-          "n_estimators": 237
+          "window_days": 180,
+          "num_leaves": 7,
+          "n_estimators": 313
         }
       },
       "5": {
@@ -140,9 +141,9 @@
           "window_days": 365
         },
         "lgbm": {
-          "window_days": 365,
-          "num_leaves": 15,
-          "n_estimators": 194
+          "window_days": 180,
+          "num_leaves": 7,
+          "n_estimators": 242
         }
       },
       "6": {
@@ -152,17 +153,17 @@
         "lgbm": {
           "window_days": 90,
           "num_leaves": 7,
-          "n_estimators": 534
+          "n_estimators": 460
         }
       },
       "7": {
         "poisson_glm": {
-          "window_days": 90
+          "window_days": 180
         },
         "lgbm": {
           "window_days": 180,
           "num_leaves": 15,
-          "n_estimators": 276
+          "n_estimators": 246
         }
       }
     }

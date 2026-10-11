@@ -1,5 +1,6 @@
 {
   "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "coverage_windows_sha256": "689cf266f1e1bdf7ae23440357463690b0e1856362b76dc2ac44d7c723bd1a3b",
   "reference": "unit_rate_28d",
   "lgbm_params": {
     "objective": "binary",
@@ -23,7 +24,7 @@
       "lgbm": {
         "window_days": 180,
         "num_leaves": 7,
-        "n_estimators": 213
+        "n_estimators": 379
       },
       "logit_text": {
         "window_days": 180
@@ -31,25 +32,25 @@
       "lgbm_text": {
         "window_days": 180,
         "num_leaves": 7,
-        "n_estimators": 131
+        "n_estimators": 147
       }
     },
     "3": {
       "logit": {
-        "window_days": 180
+        "window_days": 90
       },
       "lgbm": {
-        "window_days": 90,
-        "num_leaves": 7,
-        "n_estimators": 223
+        "window_days": 365,
+        "num_leaves": 15,
+        "n_estimators": 196
       },
       "logit_text": {
         "window_days": 180
       },
       "lgbm_text": {
-        "window_days": 60,
-        "num_leaves": 7,
-        "n_estimators": 155
+        "window_days": 180,
+        "num_leaves": 15,
+        "n_estimators": 131
       }
     },
     "6": {
@@ -57,17 +58,17 @@
         "window_days": 180
       },
       "lgbm": {
-        "window_days": 90,
-        "num_leaves": 7,
-        "n_estimators": 198
+        "window_days": 365,
+        "num_leaves": 15,
+        "n_estimators": 235
       },
       "logit_text": {
         "window_days": 180
       },
       "lgbm_text": {
-        "window_days": 90,
-        "num_leaves": 7,
-        "n_estimators": 177
+        "window_days": 365,
+        "num_leaves": 15,
+        "n_estimators": 265
       }
     }
   },

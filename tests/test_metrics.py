@@ -2,7 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.evaluation.metrics import brier, calibration_table, paired, score, within_unit_auc
+from src.evaluation.metrics import (
+    block_sums, bootstrap_skill, brier, calibration_table, paired, poisson_deviance, poisson_deviance_cells, score,
+    within_unit_auc,
+)
+from src.models.tabular import conformal_margin
 
 
 def test_score_perfect_and_reference_skill():
@@ -39,3 +43,35 @@ def test_calibration_table_bins():
     t = calibration_table(np.array([0, 1, 1, 0.0]), np.array([0.05, 0.95, 0.91, 0.12]), bins=10)
     assert t.loc[9, "observed"] == 1.0 and t.loc[9, "n"] == 2
     assert t.loc[0, "observed"] == 0.0 and t.loc[1, "n"] == 1
+
+
+def test_block_bootstrap_skill_resamples_whole_days():
+    loss_ref = np.array([1.0, 0, 0, 1.0])
+    blocks = np.array(["d1", "d1", "d2", "d2"])
+    sums, labels = block_sums(loss_ref, blocks)
+    assert sums.tolist() == [1.0, 1.0] and labels.tolist() == ["d1", "d2"]
+
+    rng = np.random.default_rng(1)
+    ref = rng.uniform(1, 2, 60)
+    better = bootstrap_skill(0.8 * ref, ref)
+    assert better["skill"] == pytest.approx(0.2) and better["ci_low"] == pytest.approx(0.2)
+    assert better["share_not_better"] == 0 and better["n_blocks"] == 60
+    noisy = bootstrap_skill(ref * rng.uniform(0.5, 1.5, 60), ref)
+    assert noisy["ci_low"] < noisy["skill"] < noisy["ci_high"]
+
+
+def test_conformal_margin_reaches_the_level_on_exchangeable_data():
+    rng = np.random.default_rng(0)
+    y_cal, y_new = rng.normal(size=2000), rng.normal(size=20000)
+    narrow = (-0.5, 0.5)  # covers ~38%: the margin has to widen it
+    m = conformal_margin(y_cal, np.full(2000, narrow[0]), np.full(2000, narrow[1]), 0.9)
+    assert m > 0
+    cover = np.mean((y_new >= narrow[0] - m) & (y_new <= narrow[1] + m))
+    assert 0.88 < cover < 0.92
+    assert conformal_margin(y_cal, np.full(2000, -5.0), np.full(2000, 5.0), 0.9) < 0  # over-wide: narrowed
+
+
+def test_poisson_deviance_cells_average_to_the_mean():
+    y, mu = np.array([0, 2, 3.5]), np.array([0.5, 2, 1.0])
+    cells = poisson_deviance_cells(y, mu)
+    assert cells[1] == 0 and poisson_deviance(y, mu) == pytest.approx(cells.mean())

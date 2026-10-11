@@ -137,3 +137,17 @@ class Calibrator:
         if self.method == "platt":
             return self.model.predict_proba(self._logit(p))[:, 1]
         return self.model.predict(p)
+
+
+def conformal_margin(y: np.ndarray, lower: np.ndarray, upper: np.ndarray, level: float) -> float:
+    """
+    Split-conformal widening of a quantile interval (CQR, Romano et al. 2019).
+
+    Fit on out-of-sample intervals of a calibration period: [lower - m, upper + m]
+    covers a new exchangeable point with probability >= level. m < 0 narrows an
+    interval that over-covers.
+    """
+    scores = np.maximum(lower - y, y - upper)
+    n = len(scores)
+    q = min(1.0, np.ceil((n + 1) * level) / n)
+    return float(np.quantile(scores, q, method="higher"))

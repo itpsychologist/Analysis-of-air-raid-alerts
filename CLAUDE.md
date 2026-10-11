@@ -20,6 +20,9 @@ uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .
 .venv/bin/python scripts/build_dataset.py       # data/raw -> data/processed
 .venv/bin/python scripts/run_backtest.py [--no-text]  # target A: select + fit models (+ *_text ablation if a Telegram snapshot exists), score vs baselines on folds + validation -> reports/results/ (~15 min)
 .venv/bin/python scripts/run_backtest_daily.py  # target B (daily count / hours per raion, k = 1..7 days), same protocol (~10 min)
+.venv/bin/python scripts/run_final_test.py --rehearse <scratch dir>  # full final-test pipeline on the validation window (safe; h=1 reproduces backtest.csv)
+.venv/bin/python scripts/run_final_test.py      # the ONE-TIME final-test run (done 2026-10-11; refuses to re-run, needs committed code)
+.venv/bin/python scripts/build_report.py        # reports/results -> reports/index.html (self-contained, offline; --cdn for a small file)
 ```
 
 The app requires `ALERTS_API_TOKEN`, resolved in `get_api_token()` (app.py) from `st.secrets` first, then the environment variable. Locally, put it in `.streamlit/secrets.toml` (gitignored).
@@ -36,10 +39,11 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
   - on any Holt-Winters failure, or with <14 points, it falls back to Ridge regression on trend plus sin/cos weekly and monthly features.
 
   The CI is ±1.96·std of the in-sample residuals. `statsmodels` and the `etl` helpers are imported inside functions, not at module top level.
-- **`app.py`**: the Streamlit UI. It contains the custom CSS, colour constants (dark theme matching `.streamlit/config.toml`), Plotly chart builders (`make_*_chart`), and the renderers `render_sidebar`, `render_kpi_row`, `render_history_tab` and `render_forecast_tab`, all orchestrated by `main()`.
+- **`app.py`**: the Streamlit UI. It contains the custom CSS and the renderers `render_sidebar`, `render_kpi_row`, `render_history_tab`, `render_forecast_tab` and `render_backtest_tab` (final-test results from `reports/results/`, shown even without a token), all orchestrated by `main()`.
   - `load_data` wraps the ETL in `@st.cache_data(ttl=300)`.
   - `get_forecast` wraps forecasting in `@st.cache_resource` and takes hashable tuples of values and dates instead of a Series.
   - `main()` reads `st.session_state["fetch_history"]` *before* the sidebar renders, so the sidebar toggle takes effect on the next rerun.
+- **`src/viz/charts.py`**: all Plotly figures (pure Plotly, no Streamlit), shared by `app.py` and `scripts/build_report.py`: the dashboard charts (`make_*_chart`, colour constants) and the evaluation charts (`theme="dark"|"light"`). `src/viz/results.py` loads the committed results and computes the report's data-overview tables.
 
 ## Data pipeline (`src/data/`, forecasting project)
 
@@ -60,6 +64,8 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
 - `models/baselines.py`: reference forecasts on the label matrix (target A) and daily baselines incl. the dashboard's Holt-Winters refit per origin (target B). Shifts are in rows, so they require a regular hourly index; never group by Kyiv local hour (DST makes "previous same hour" 1 h away).
 - `evaluation/metrics.py`: Brier/BSS, log loss, ROC-AUC, PR-AUC and `within_unit_auc` — pooled AUC is dominated by frontline-vs-west differences; within-unit AUC measures timing skill.
 - `tests/test_leakage.py`, `tests/test_features.py`, `tests/test_daily.py` and `tests/test_text.py` hold the future-perturbation tests; any new feature or model needs one (`test_features.py` rewrites raw intervals after t and checks every feature at t).
+
+**Final test (stage 5):** `scripts/run_final_test.py` trains every model with the frozen `model_config*.json` on the test as a split and writes `reports/results/final_test*` plus the marker `final_test.json` (written as "opened" before scoring). Don't re-run it and don't change models because of its numbers; any later model change must be evaluated on new data after the cutoff. Forecasts undefined on part of the test (seasonal naive after the data gap, Holt-Winters) are scored on their own subset (`n`), never by shrinking the cells of the other models.
 
 Open alerts are closed at the data cutoff (`open_until`), never at "now", to avoid leakage.
 

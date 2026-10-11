@@ -73,11 +73,16 @@ def calibration_table(y: np.ndarray, p: np.ndarray, bins: int = 10) -> pd.DataFr
 # Target B: counts / durations (PLAN.md, section 4.3)
 # ---------------------------------------------------------------------------
 
-def poisson_deviance(y: np.ndarray, mu: np.ndarray, eps: float = 1e-6) -> float:
-    """Mean Poisson deviance; works for non-integer y >= 0 (durations) too."""
+def poisson_deviance_cells(y: np.ndarray, mu: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+    """Per-cell Poisson deviance; works for non-integer y >= 0 (durations) too."""
     mu = np.maximum(mu, eps)
     term = np.where(y > 0, y * np.log(np.where(y > 0, y, 1) / mu), 0.0)
-    return float(np.mean(2 * (term - (y - mu))))
+    return 2 * (term - (y - mu))
+
+
+def poisson_deviance(y: np.ndarray, mu: np.ndarray, eps: float = 1e-6) -> float:
+    """Mean Poisson deviance."""
+    return float(np.mean(poisson_deviance_cells(y, mu, eps)))
 
 
 def regression_scores(y: np.ndarray, p: np.ndarray, reference_mae: float | None = None) -> dict[str, float]:
@@ -106,3 +111,35 @@ def pinball(y: np.ndarray, q: np.ndarray, alpha: float) -> float:
 def interval_scores(y: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> dict[str, float]:
     """Empirical coverage and mean width of a central interval."""
     return {"coverage": float(np.mean((y >= lower) & (y <= upper))), "width": float(np.mean(upper - lower))}
+
+
+# ---------------------------------------------------------------------------
+# Significance: block bootstrap over days (PLAN.md, section 4.3)
+# ---------------------------------------------------------------------------
+
+def block_sums(loss: np.ndarray, blocks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-block sums of a per-cell loss and the block labels (e.g. Kyiv days)."""
+    labels, inverse = np.unique(blocks, return_inverse=True)
+    return np.bincount(inverse, weights=loss, minlength=len(labels)), labels
+
+
+def bootstrap_skill(loss: np.ndarray, loss_ref: np.ndarray, n_boot: int = 2000,
+                    level: float = 0.95, seed: int = 0) -> dict[str, float]:
+    """
+    Skill 1 - sum(loss) / sum(loss_ref) with a block-bootstrap interval.
+
+    `loss` and `loss_ref` are per-block sums (block_sums) over the same cells, so
+    blocks (days) are resampled whole: hours within a day are strongly dependent.
+    `share_not_better` is the share of resamples with skill <= 0 (not a p-value).
+    """
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(loss), size=(n_boot, len(loss)))
+    boot = 1 - loss[idx].sum(axis=1) / loss_ref[idx].sum(axis=1)
+    a = (1 - level) / 2
+    return {
+        "skill": float(1 - loss.sum() / loss_ref.sum()),
+        "ci_low": float(np.quantile(boot, a)),
+        "ci_high": float(np.quantile(boot, 1 - a)),
+        "share_not_better": float(np.mean(boot <= 0)),
+        "n_blocks": int(len(loss)),
+    }

@@ -33,7 +33,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.build import load  # noqa: E402
+from src.data.build import load, windows_fingerprint  # noqa: E402
 from src.data.telegram import latest_snapshot, load_messages  # noqa: E402
 from src.evaluation.metrics import brier, calibration_table, paired, score, within_unit_auc  # noqa: E402
 from src.evaluation.splits import load_frozen_test, make_splits  # noqa: E402
@@ -230,6 +230,7 @@ def main() -> None:
             RESULTS_DIR / f"{key}.csv", index=False, float_format="%.4f")
     config = {
         "data_cutoff": coverage["data_cutoff"],
+        "coverage_windows_sha256": windows_fingerprint(coverage),
         "reference": REFERENCE,
         "lgbm_params": spec.params,
         "horizons": {str(h): o["config"] for h, o in zip(HORIZONS, out)},

@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.build import load  # noqa: E402
+from src.data.build import load, windows_fingerprint  # noqa: E402
 from src.evaluation.metrics import interval_scores, paired, pinball, poisson_deviance, regression_scores  # noqa: E402
 from src.evaluation.splits import load_frozen_test  # noqa: E402
 from src.features.asof import history_features, stack  # noqa: E402
@@ -165,6 +165,7 @@ def main() -> None:
         RESULTS_DIR / "model_selection_daily.csv", index=False, float_format="%.4f")
     config = {
         "data_cutoff": coverage["data_cutoff"],
+        "coverage_windows_sha256": windows_fingerprint(coverage),
         "reference": REFERENCE,
         "lgbm_params": SPEC.params,
         "quantiles": QUANTILES,
