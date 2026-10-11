@@ -1,0 +1,50 @@
+{
+  "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "reference": "unit_rate_28d",
+  "lgbm_params": {
+    "objective": "binary",
+    "learning_rate": 0.05,
+    "num_leaves": 15,
+    "min_child_samples": 3000,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "random_state": 0,
+    "deterministic": true,
+    "force_row_wise": true,
+    "verbose": -1
+  },
+  "horizons": {
+    "1": {
+      "logit": {
+        "window_days": 180
+      },
+      "lgbm": {
+        "window_days": 180,
+        "num_leaves": 7,
+        "n_estimators": 213
+      }
+    },
+    "3": {
+      "logit": {
+        "window_days": 180
+      },
+      "lgbm": {
+        "window_days": 90,
+        "num_leaves": 7,
+        "n_estimators": 223
+      }
+    },
+    "6": {
+      "logit": {
+        "window_days": 180
+      },
+      "lgbm": {
+        "window_days": 90,
+        "num_leaves": 7,
+        "n_estimators": 198
+      }
+    }
+  }
+}

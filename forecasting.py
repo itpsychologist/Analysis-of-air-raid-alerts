@@ -183,7 +183,8 @@ def prepare_series_for_region(
     Fills gaps (zero-count days) so the series is contiguous.
 
     Args:
-        daily_df:    Output of etl.compute_daily_counts() — must have 'date' and 'count' columns.
+        daily_df:    Output of etl.compute_daily_counts() — must have 'date' and 'count' columns;
+                     days with is_complete == False are dropped.
         region_name: Optional label for logging context.
 
     Returns:
@@ -194,6 +195,12 @@ def prepare_series_for_region(
         return pd.Series([], dtype=float, name="count")
 
     df = daily_df.copy()
+    if "is_complete" in df:
+        # A partial day (window start, or today) would look like a drop in alerts
+        df = df[df["is_complete"].astype(bool)]
+        if df.empty:
+            logger.warning("No complete days for region=%s", region_name)
+            return pd.Series([], dtype=float, name="count")
     df["date"] = pd.to_datetime(df["date"], utc=True)
     df = df.sort_values("date")
 

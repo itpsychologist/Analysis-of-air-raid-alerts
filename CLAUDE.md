@@ -17,7 +17,7 @@ uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .
 .venv/bin/python -m pytest tests/test_merge.py::test_open_alert_is_closed_at_cutoff_not_later   # single test
 .venv/bin/python scripts/fetch_data.py [--api]  # new raw snapshots; --api takes ~13 min (rate limit)
 .venv/bin/python scripts/build_dataset.py       # data/raw -> data/processed
-.venv/bin/python scripts/run_backtest.py        # score baselines on folds + validation -> reports/results/
+.venv/bin/python scripts/run_backtest.py        # select + fit models, score vs baselines on folds + validation -> reports/results/ (~5 min)
 ```
 
 The app requires `ALERTS_API_TOKEN`, resolved in `get_api_token()` (app.py) from `st.secrets` first, then the environment variable. Locally, put it in `.streamlit/secrets.toml` (gitignored).
@@ -49,11 +49,13 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
 
 ## Evaluation framework (`src/features`, `src/evaluation`, `src/models`)
 
-- `features/panel.py`: wide hourly matrices (UTC hours × units): `starts`, `active_minutes`, `covered`. Target A `labels(panel, h)`: 1 if a new alert starts in [t, t+h), NaN if the window touches an uncovered hour. The label of origin t is only known at t + h — anything used as input at t may only read labels with t' + h <= t.
+- `features/panel.py`: wide hourly matrices (UTC hours × units): `starts`, `active_minutes`, `covered`, `active_at` (under alert at the instant t). Target A `labels(panel, h)`: 1 if a new alert starts in [t, t+h), NaN if the window touches an uncovered hour. The label of origin t is only known at t + h — anything used as input at t may only read labels with t' + h <= t.
 - `evaluation/splits.py`: final test = last 28 days (scored **once**, at the end of the project; `run_backtest.py` must not score it), validation = 28 days before the data gap, 6 weekly rolling folds; embargo = h (`Split.train_end`).
+- `features/asof.py`: features as of origin t (row t reads only hours < t, `active_at[t]`, labels with t' + h <= t via the baselines, and the Kyiv calendar). Unit history, same-oblast / neighbouring-oblast (`features/geo.py`, hand-written adjacency) / country aggregates. `stack` turns wide features into the long (origin, unit) design matrix.
+- `models/tabular.py`: logistic regression and LightGBM, fit per split on `train_rows` (origins < `train_end(h)` within a window of days); Platt/isotonic calibrators. `run_backtest.py` selects the training window and tree settings on validation only (so validation scores of models are optimistic; folds reuse those later-chosen settings too, so only the final test is unbiased) and writes `model_config.json` for the final-test run.
 - `models/baselines.py`: reference forecasts on the label matrix. Shifts are in rows, so they require a regular hourly index; never group by Kyiv local hour (DST makes "previous same hour" 1 h away).
 - `evaluation/metrics.py`: Brier/BSS, log loss, ROC-AUC, PR-AUC and `within_unit_auc` — pooled AUC is dominated by frontline-vs-west differences; within-unit AUC measures timing skill.
-- `tests/test_leakage.py` holds the future-perturbation tests; any new feature or model needs one.
+- `tests/test_leakage.py` and `tests/test_features.py` hold the future-perturbation tests; any new feature or model needs one (`test_features.py` rewrites raw intervals after t and checks every feature at t).
 
 Open alerts are closed at the data cutoff (`open_until`), never at "now", to avoid leakage.
 

@@ -6,6 +6,12 @@ Resilient ETL pipeline for alerts.in.ua API.
 Rate limits:
   - /v1/alerts/active.json          → 8-12 req/min  (cached 5 min)
   - /v1/regions/{uid}/alerts/...    → 2 req/min      (cached 5 min, fetched once)
+
+Time conventions (PLAN.md 1.2, 3.1):
+  - timestamps stay UTC; calendar fields (date, hour, weekday) are Europe/Kyiv local time
+  - duration_minutes is what is known at the fetch time `as_of`: for alerts still
+    active it is censored (is_active=True) and is excluded from average durations
+  - daily aggregates flag days that are not fully observed (is_complete=False)
 """
 
 from __future__ import annotations
@@ -21,6 +27,8 @@ import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
+
+KYIV_TZ = "Europe/Kyiv"
 
 # ---------------------------------------------------------------------------
 # Oblast UID mapping (oblast-level only, as per the API documentation)
@@ -229,22 +237,23 @@ def _compute_duration(
     now: datetime,
 ) -> Optional[float]:
     """
-    Compute alert duration in minutes.
+    Alert duration in minutes as known at `now`: min(finished, now) - started.
 
-    For active (ongoing) alerts where `finished` is None,
-    uses `now` as the effective end time.
+    For an alert still active at `now` this is a lower bound (censored), not
+    its duration; the record's is_active flag marks that case. Nothing after
+    `now` is ever used.
 
     Args:
         started:  Alert start datetime (UTC-aware).
         finished: Alert end datetime (UTC-aware), or None if still active.
-        now:      Current UTC datetime for active-alert duration estimation.
+        now:      The as-of time (fetch time).
 
     Returns:
         Duration in minutes as float, or None if start is unknown.
     """
     if started is None:
         return None
-    end = finished if finished is not None else now
+    end = min(finished, now) if finished is not None else now
     delta = end - started
     minutes = delta.total_seconds() / 60.0
     # Guard against negative durations (data quality issue)
@@ -254,6 +263,7 @@ def _compute_duration(
 def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add cyclical and categorical time-series features to the DataFrame.
+    All calendar fields are Kyiv local time (a UTC date shifts the day by 2-3 hours).
 
     Features added:
         - hour_of_day     : 0–23
@@ -273,7 +283,7 @@ def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with new feature columns appended.
     """
-    dt = df["started_at"].dt
+    dt = df["started_at"].dt.tz_convert(KYIV_TZ).dt
     df = df.copy()
     df["hour_of_day"] = dt.hour
     df["day_of_week"] = dt.dayofweek
@@ -443,27 +453,46 @@ def fetch_and_process_data(
     # This is used for the trend chart MA overlay
     df["date"] = pd.to_datetime(df["date"])
 
+    # The fetch time: the last day is only observed up to here (see compute_daily_counts)
+    df.attrs["as_of"] = pd.Timestamp(now)
     status["last_updated"] = now
     return df, status
+
+
+def mean_finished_duration(df: pd.DataFrame) -> float:
+    """Mean duration (minutes) of finished alerts; active ones are censored at `as_of`."""
+    finished = df.loc[~df["is_active"].astype(bool), "duration_minutes"] if "is_active" in df else df["duration_minutes"]
+    return float(finished.mean()) if finished.notna().any() else 0.0
 
 
 def compute_daily_counts(
     df: pd.DataFrame,
     oblast_filter: Optional[list[str]] = None,
     alert_type_filter: Optional[list[str]] = None,
+    as_of: Optional[datetime] = None,
 ) -> pd.DataFrame:
     """
-    Aggregate alert counts and average duration by date.
+    Aggregate alert counts and average duration by Kyiv-local date.
 
     Args:
         df:                 Processed alerts DataFrame from fetch_and_process_data.
         oblast_filter:      If provided, filter to only these English oblast names.
         alert_type_filter:  If provided, filter to only these alert_type_en values.
+        as_of:              Fetch time; defaults to df.attrs["as_of"] (set by the ETL).
 
     Returns:
-        DataFrame indexed by date with columns:
-            count, avg_duration_minutes, total_duration_minutes, rolling_7d_avg
+        DataFrame with columns:
+            date, count, avg_duration_minutes (finished alerts only),
+            total_duration_minutes (known part, up to as_of), rolling_7d_avg,
+            is_complete — False for the first day (the history window starts
+            mid-day) and for the day of as_of (still running). Forecasting must
+            use complete days only.
     """
+    as_of = as_of if as_of is not None else df.attrs.get("as_of")
+    if as_of is None and not df.empty and "started_at" in df:
+        # Conservative fallback: treat the day of the latest alert as still running
+        logger.warning("compute_daily_counts: no as_of; marking the last day incomplete")
+        as_of = df["started_at"].max()
     data = df.copy()
 
     if oblast_filter:
@@ -474,11 +503,13 @@ def compute_daily_counts(
     # Filter to oblast-level for clean non-overlapping counts
     data = data[data["location_type"] == "oblast"]
 
+    finished_duration = data["duration_minutes"].where(~data["is_active"].astype(bool)) if "is_active" in data else data["duration_minutes"]
     daily = (
-        data.groupby("date")
+        data.assign(finished_duration=finished_duration)
+        .groupby("date")
         .agg(
             count=("id", "count"),
-            avg_duration_minutes=("duration_minutes", "mean"),
+            avg_duration_minutes=("finished_duration", "mean"),
             total_duration_minutes=("duration_minutes", "sum"),
         )
         .reset_index()
@@ -486,19 +517,15 @@ def compute_daily_counts(
     daily["date"] = pd.to_datetime(daily["date"])
     daily = daily.sort_values("date")
 
-    # Determine the date range to gap-fill against. Prefer the filtered
-    # data's own range; but if the oblast filter produced ZERO rows (a
-    # genuinely quiet region), fall back to the full unfiltered dataset's
-    # range so we still return a proper all-zero daily series instead of an
-    # empty frame. An empty frame here silently propagates downstream into
-    # prepare_series_for_region() -> an empty pd.Series -> a misleading
-    # "insufficient historical data" message, even when the real story is
-    # "this region simply had 0 alerts in the window".
-    if not daily.empty:
-        range_start, range_end = daily["date"].min(), daily["date"].max()
-    elif not df.empty and "date" in df.columns:
+    # Gap-fill against the full unfiltered dataset's range: the window the data
+    # covers does not depend on the filter, and a quiet region (few or zero
+    # alerts) must still get its zero days. An empty frame here would propagate
+    # into prepare_series_for_region() as a misleading "insufficient data".
+    if not df.empty and "date" in df.columns:
         full_dates = pd.to_datetime(df["date"])
         range_start, range_end = full_dates.min(), full_dates.max()
+    elif not daily.empty:
+        range_start, range_end = daily["date"].min(), daily["date"].max()
     else:
         range_start, range_end = None, None
 
@@ -511,12 +538,16 @@ def compute_daily_counts(
         )
         daily.columns = ["date", "count", "avg_duration_minutes", "total_duration_minutes"]
         daily["rolling_7d_avg"] = daily["count"].rolling(window=7, min_periods=1).mean()
+        daily["is_complete"] = daily["date"] > daily["date"].min()
+        if as_of is not None:
+            as_of_date = pd.Timestamp(as_of).tz_convert(KYIV_TZ).tz_localize(None).normalize()
+            daily["is_complete"] &= daily["date"] < as_of_date
     else:
         # Truly no data anywhere (e.g. df itself is empty) — return a
         # well-formed empty frame with the expected columns rather than a
         # bare DataFrame() that's missing 'rolling_7d_avg'.
         daily = pd.DataFrame(
-            columns=["date", "count", "avg_duration_minutes", "total_duration_minutes", "rolling_7d_avg"]
+            columns=["date", "count", "avg_duration_minutes", "total_duration_minutes", "rolling_7d_avg", "is_complete"]
         )
 
     return daily
@@ -595,11 +626,13 @@ def compute_vulnerability_score(
     if data.empty:
         return pd.DataFrame(columns=["location_oblast_en", "alert_count", "avg_duration_minutes", "vulnerability_score"])
 
+    finished_duration = data["duration_minutes"].where(~data["is_active"].astype(bool)) if "is_active" in data else data["duration_minutes"]
     agg = (
-        data.groupby("location_oblast_en")
+        data.assign(finished_duration=finished_duration)
+        .groupby("location_oblast_en")
         .agg(
             alert_count=("id", "count"),
-            avg_duration_minutes=("duration_minutes", "mean"),
+            avg_duration_minutes=("finished_duration", "mean"),
         )
         .reset_index()
     )

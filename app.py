@@ -55,6 +55,7 @@ from etl import (
     OBLAST_EN_MAP,
     ALERT_TYPE_EN_MAP,
     compute_daily_counts,
+    mean_finished_duration,
     compute_heatmap_data,
     compute_vulnerability_score,
     fetch_and_process_data,
@@ -856,8 +857,9 @@ def render_kpi_row(
 
     total_alerts = len(current)
     prev_total = len(previous)
-    avg_duration = current["duration_minutes"].mean() if not current.empty else 0.0
-    prev_avg_dur = previous["duration_minutes"].mean() if not previous.empty else 0.0
+    # Active alerts are censored at fetch time, so averages use finished alerts only
+    avg_duration = mean_finished_duration(current) if not current.empty else 0.0
+    prev_avg_dur = mean_finished_duration(previous) if not previous.empty else 0.0
     max_duration = current["duration_minutes"].max() if not current.empty else 0.0
     unique_oblasts = current["location_oblast_en"].nunique()
 

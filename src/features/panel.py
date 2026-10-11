@@ -7,6 +7,9 @@ raion intervals (see src/data/build.py):
   starts          number of alert *starts* (calm -> alert transitions) in the hour
   active_minutes  minutes under alert in the hour
   covered         whether the whole hour lies inside one source window
+  active_at       whether the unit is under alert at the hour boundary itself
+                  (started_at < t < finished_at); known at t, since an alert that is
+                  still running at t has started before t and not yet finished
 
 Target A for a forecast made at hour boundary t with horizon h:
 
@@ -33,6 +36,7 @@ class Panel:
     active_minutes: pd.DataFrame
     covered: pd.Series
     data_cutoff: pd.Timestamp
+    active_at: pd.DataFrame | None = None
 
     @property
     def hours(self) -> pd.DatetimeIndex:
@@ -50,6 +54,7 @@ class Panel:
             active_minutes=self.active_minutes[keep],
             covered=self.covered[keep] & (self.hours[keep] + pd.Timedelta(hours=1) <= end),
             data_cutoff=min(self.data_cutoff, end),
+            active_at=None if self.active_at is None else self.active_at[keep],
         )
 
 
@@ -61,6 +66,25 @@ def _covered_hours(hours: pd.DatetimeIndex, windows: list[dict]) -> pd.Series:
         start, end = pd.Timestamp(w["start"]), pd.Timestamp(w["end"])
         covered |= (hours >= start.ceil("h")) & (hours + pd.Timedelta(hours=1) <= end)
     return covered
+
+
+def _active_at_boundaries(intervals: pd.DataFrame, hours: pd.DatetimeIndex, units: list[str]) -> pd.DataFrame:
+    """1.0 where an interval strictly contains the hour boundary, else 0.0."""
+    out = np.zeros((len(hours) + 1, len(units)))
+    col = pd.Index(units).get_indexer(intervals["unit"])
+    iv = intervals[col >= 0]
+    col = col[col >= 0]
+    if len(iv):
+        hour = pd.Timedelta(hours=1)
+        s = ((iv["started_at"] - hours[0]) / hour).to_numpy()
+        e = ((iv["finished_at"] - hours[0]) / hour).to_numpy()
+        first = np.clip(np.floor(s).astype(int) + 1, 0, len(hours))  # first boundary > start
+        last = np.clip(np.ceil(e).astype(int) - 1, -1, len(hours) - 1)  # last boundary < end
+        ok = last >= first
+        np.add.at(out, (first[ok], col[ok]), 1)
+        np.add.at(out, (last[ok] + 1, col[ok]), -1)
+    active = (np.cumsum(out, axis=0)[:-1] > 0).astype(float)
+    return pd.DataFrame(active, index=hours, columns=units)
 
 
 def build_panel(
@@ -96,6 +120,7 @@ def build_panel(
         active_minutes=active,
         covered=_covered_hours(active.index, windows),
         data_cutoff=cutoff,
+        active_at=_active_at_boundaries(intervals, active.index, units),
     )
 
 
