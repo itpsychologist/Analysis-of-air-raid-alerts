@@ -17,6 +17,7 @@ uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .
 .venv/bin/python -m pytest tests/test_merge.py::test_open_alert_is_closed_at_cutoff_not_later   # single test
 .venv/bin/python scripts/fetch_data.py [--api]  # new raw snapshots; --api takes ~13 min (rate limit)
 .venv/bin/python scripts/build_dataset.py       # data/raw -> data/processed
+.venv/bin/python scripts/run_backtest.py        # score baselines on folds + validation -> reports/results/
 ```
 
 The app requires `ALERTS_API_TOKEN`, resolved in `get_api_token()` (app.py) from `st.secrets` first, then the environment variable. Locally, put it in `.streamlit/secrets.toml` (gitignored).
@@ -45,6 +46,14 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
 - `fetch_api.py`: alerts.in.ua `month_ago` per oblast → `data/raw/alerts_in_ua/<fetched_at>/<uid>.json` + `manifest.json`.
 - `merge.py`: one event schema for all sources; harmonizes oblast/raion names (apostrophes, 2024 raion renames); `expand_to_raions` maps oblast-level alerts onto every raion of the oblast; `union_intervals` merges overlaps per unit.
 - `build.py`: stitches sources **by time, never mixed**: official → gap → API. Writes `data/processed/raion_intervals.parquet` and `coverage.json` (windows, gap, provenance, data cutoff). The forecast unit is the raion (118 + Kyiv City); hromada-level alerts and Luhansk oblast (permanent alert) are excluded.
+
+## Evaluation framework (`src/features`, `src/evaluation`, `src/models`)
+
+- `features/panel.py`: wide hourly matrices (UTC hours × units): `starts`, `active_minutes`, `covered`. Target A `labels(panel, h)`: 1 if a new alert starts in [t, t+h), NaN if the window touches an uncovered hour. The label of origin t is only known at t + h — anything used as input at t may only read labels with t' + h <= t.
+- `evaluation/splits.py`: final test = last 28 days (scored **once**, at the end of the project; `run_backtest.py` must not score it), validation = 28 days before the data gap, 6 weekly rolling folds; embargo = h (`Split.train_end`).
+- `models/baselines.py`: reference forecasts on the label matrix. Shifts are in rows, so they require a regular hourly index; never group by Kyiv local hour (DST makes "previous same hour" 1 h away).
+- `evaluation/metrics.py`: Brier/BSS, log loss, ROC-AUC, PR-AUC and `within_unit_auc` — pooled AUC is dominated by frontline-vs-west differences; within-unit AUC measures timing skill.
+- `tests/test_leakage.py` holds the future-perturbation tests; any new feature or model needs one.
 
 Open alerts are closed at the data cutoff (`open_until`), never at "now", to avoid leakage.
 

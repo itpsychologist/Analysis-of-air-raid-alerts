@@ -1,0 +1,11 @@
+{
+  "note": "Final test window, frozen when it was defined. Do not change after models have been compared; scored once at the end of the project (PLAN.md 4.1). Origins for horizon h: [test_start, test_end - (h-1) hours).",
+  "frozen_on": "2026-10-11",
+  "test_start": "2026-09-13T10:00:00+00:00",
+  "test_end": "2026-10-11T10:00:00+00:00",
+  "data_cutoff": "2026-10-11T10:06:46.909293+00:00",
+  "snapshots": {
+    "official_data_uk": "20261011T100347Z_bf0c323c78e3.csv.gz",
+    "alerts_in_ua": "20261011T100646Z"
+  }
+}

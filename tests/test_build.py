@@ -20,8 +20,8 @@ def test_api_coverage_starts_at_first_full_day_of_the_month_window():
 def test_stitch_keeps_sources_in_their_windows_and_leaves_the_gap_empty():
     official = ev([
         ("Сумська область", None, "oblast", "2026-09-01 10:00", "2026-09-01 11:00"),
-        ("Сумська область", "Сумський район", "raion", "2026-09-07 04:00", "2026-09-08 12:00"),  # runs into gap
-        # The last start defines the end of official coverage
+        ("Сумська область", "Сумський район", "raion", "2026-09-06 04:00", "2026-09-08 12:00"),  # runs into gap
+        # The last start minus OFFICIAL_TAIL_TRIM (24 h) defines the end of official coverage
         ("Сумська область", "Конотопський район", "raion", "2026-09-07 05:00", "2026-09-07 05:20"),
     ])
     api = ev([
@@ -32,7 +32,7 @@ def test_stitch_keeps_sources_in_their_windows_and_leaves_the_gap_empty():
     cutoff = T("2026-10-11 10:00")
     iv, windows, unit_oblast = stitch(official, api, cutoff)
 
-    official_end = T("2026-09-07 05:00")
+    official_end = T("2026-09-06 05:00")
     api_start = T("2026-09-12")
     assert [w["source"] for w in windows] == ["official", "gap", "alerts_in_ua"]
     assert windows[1] == {"source": "gap", "start": official_end.isoformat(), "end": api_start.isoformat()}

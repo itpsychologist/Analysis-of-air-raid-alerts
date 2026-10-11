@@ -37,6 +37,12 @@ PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed"
 # varying per oblast; coverage starts at the first full UTC day after that
 API_HISTORY_DAYS = 30
 
+# The official feed writes an alert only once it has finished (no open rows; nothing
+# ends more than minutes after the last start). Alerts still running when the feed
+# stopped are therefore missing, so its last day is treated as not covered: only
+# alerts longer than this (<1% of raion alerts in 2026) can still be missing.
+OFFICIAL_TAIL_TRIM = pd.Timedelta(hours=24)
+
 
 def api_coverage_start(fetched_at: pd.Timestamp) -> pd.Timestamp:
     return (fetched_at - pd.Timedelta(days=API_HISTORY_DAYS)).ceil("D")
@@ -52,8 +58,7 @@ def stitch(
     Returns (intervals, windows, unit_oblast).
     """
     official_start = official["started_at"].min()
-    # Records stop arriving at the last start; later-ending alerts are still complete
-    official_end = official["started_at"].max()
+    official_end = official["started_at"].max() - OFFICIAL_TAIL_TRIM
     api_start = max(api_coverage_start(api_fetched_at), official_end)
 
     raion_map = raions_by_oblast(official, api)
