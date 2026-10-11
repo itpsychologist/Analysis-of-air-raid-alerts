@@ -13,4 +13,4 @@ venv/
 .DS_Store
 
 # Data snapshots (reproducible via scripts/fetch_data.py)
-data/
+/data/
