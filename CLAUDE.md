@@ -4,13 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Streamlit dashboard that analyses and forecasts Ukrainian air-raid alerts from the alerts.in.ua API (docs: https://devs.alerts.in.ua). Deployed on Streamlit Cloud with `app.py` as the entry point. There are no tests, linters, or build steps.
+Streamlit dashboard that analyses and forecasts Ukrainian air-raid alerts from the alerts.in.ua API (docs: https://devs.alerts.in.ua). Deployed on Streamlit Cloud with `app.py` as the entry point. The forecasting project (see `PLAN.md`) adds a data pipeline in `src/`, CLIs in `scripts/` and tests in `tests/`.
 
 ## Commands
 
+Use the project venv (Python 3.12; the pins in `requirements.txt` don't build on 3.14, and `pyarrow` must stay <18 for numpy 1.26):
+
 ```bash
-pip install -r requirements.txt   # pinned versions (streamlit 1.35, pandas 2.2, statsmodels 0.14, scikit-learn 1.5)
-streamlit run app.py              # http://localhost:8501
+uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .venv/bin/python -r requirements-dev.txt
+.venv/bin/streamlit run app.py                  # dashboard, http://localhost:8501
+.venv/bin/python -m pytest                      # all tests (pytest.ini sets pythonpath)
+.venv/bin/python -m pytest tests/test_merge.py::test_open_alert_is_closed_at_cutoff_not_later   # single test
+.venv/bin/python scripts/fetch_data.py [--api]  # new raw snapshots; --api takes ~13 min (rate limit)
+.venv/bin/python scripts/build_dataset.py       # data/raw -> data/processed
 ```
 
 The app requires `ALERTS_API_TOKEN`, resolved in `get_api_token()` (app.py) from `st.secrets` first, then the environment variable. Locally, put it in `.streamlit/secrets.toml` (gitignored).
@@ -31,6 +37,16 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
   - `load_data` wraps the ETL in `@st.cache_data(ttl=300)`.
   - `get_forecast` wraps forecasting in `@st.cache_resource` and takes hashable tuples of values and dates instead of a Series.
   - `main()` reads `st.session_state["fetch_history"]` *before* the sidebar renders, so the sidebar toggle takes effect on the next rerun.
+
+## Data pipeline (`src/data/`, forecasting project)
+
+`data/` is gitignored and reproducible from the scripts. Raw snapshots are immutable (never overwrite; new download = new file):
+- `load_dataset.py`: GitHub dataset `Vadimkin/ukrainian-air-raid-sirens-dataset`, pinned to a commit → `data/raw/github/<dataset>/<fetched_at>_<sha>.csv.gz`. The official CSV contains a fully duplicated block (dropped in `normalize_official`) and currently ends 2026-09-07.
+- `fetch_api.py`: alerts.in.ua `month_ago` per oblast → `data/raw/alerts_in_ua/<fetched_at>/<uid>.json` + `manifest.json`.
+- `merge.py`: one event schema for all sources; harmonizes oblast/raion names (apostrophes, 2024 raion renames); `expand_to_raions` maps oblast-level alerts onto every raion of the oblast; `union_intervals` merges overlaps per unit.
+- `build.py`: stitches sources **by time, never mixed**: official → gap → API. Writes `data/processed/raion_intervals.parquet` and `coverage.json` (windows, gap, provenance, data cutoff). The forecast unit is the raion (118 + Kyiv City); hromada-level alerts and Luhansk oblast (permanent alert) are excluded.
+
+Open alerts are closed at the data cutoff (`open_until`), never at "now", to avoid leakage.
 
 ## API rate limits (important when touching ETL or caching)
 
