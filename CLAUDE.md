@@ -43,6 +43,7 @@ Three modules form a one-way pipeline: `etl.py` → `forecasting.py` → `app.py
   - `load_data` wraps the ETL in `@st.cache_data(ttl=300)`.
   - `get_forecast` wraps forecasting in `@st.cache_resource` and takes hashable tuples of values and dates instead of a Series.
   - `main()` reads `st.session_state["fetch_history"]` *before* the sidebar renders, so the sidebar toggle takes effect on the next rerun.
+  - `main()` creates the tabs and renders the Backtest tab *before* the token check and the data load, so it is usable during the ~13-min history load. Its h/target choices are nested `st.tabs` (client-side, no rerun) — don't turn them into widgets: a rerun can't run until the load finishes.
 - **`src/viz/charts.py`**: all Plotly figures (pure Plotly, no Streamlit), shared by `app.py` and `scripts/build_report.py`: the dashboard charts (`make_*_chart`, colour constants) and the evaluation charts (`theme="dark"|"light"`). `src/viz/results.py` loads the committed results and computes the report's data-overview tables.
 
 ## Data pipeline (`src/data/`, forecasting project)

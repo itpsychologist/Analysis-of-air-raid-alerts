@@ -813,49 +813,73 @@ def get_results():
     return load_results()
 
 
+@st.cache_data(show_spinner=False)
+def backtest_figures() -> dict:
+    """All Backtest figures, built once per process (the results are static files)."""
+    res = get_results()
+    figs = {"skill": eval_charts.make_skill_chart(res.bootstrap)}
+    for h in (1, 3, 6):
+        figs[f"rel{h}"] = eval_charts.make_reliability_chart(res.reliability, h)
+        figs[f"oblast{h}"] = eval_charts.make_oblast_skill_chart(res.errors, h)
+        figs[f"fact{h}"] = eval_charts.make_hourly_fact_chart(res.hourly_series, h)
+    for target in ("count", "duration"):
+        figs[f"mase_{target}"] = eval_charts.make_mase_chart(res.daily, target)
+        figs[f"cov_{target}"] = eval_charts.make_coverage_chart(res.intervals, target)
+        figs[f"daily_{target}"] = eval_charts.make_daily_fact_chart(res.daily_series, target, 1)
+    return figs
+
+
 def render_backtest_tab() -> None:
-    """Final-test metrics, calibration and forecast vs actual (scripts/run_final_test.py)."""
+    """
+    Final-test metrics, calibration and forecast vs actual (scripts/run_final_test.py).
+
+    Needs no API: it is rendered before the data load. The horizon / target choices
+    are nested tabs, which switch in the browser without a rerun, so the tab stays
+    interactive while the (rate-limited, ~13 min) history load is still running.
+    """
     res = get_results()
     if res is None:
         st.info("No final-test results yet: run `scripts/run_final_test.py` and `scripts/build_report.py`.")
         return
+    figs = backtest_figures()
     m = res.marker
     t0, t1 = (pd.Timestamp(x) for x in m["test_window_utc"])
     st.markdown(
         f"Evaluation on the **frozen final test, {t0:%d %b} – {t1:%d %b %Y}** (scored once, "
         f"{pd.Timestamp(m['scored_at']):%d %b %Y}); data cutoff {pd.Timestamp(m['data_cutoff']):%d %b %Y %H:%M} UTC. "
         "Models were selected on earlier data only. Forecasts are analytical and **do not replace official "
-        "alert signals**. The static report `reports/index.html` explains the method."
+        "alert signals**. Method and full results: "
+        "[static report](https://itpsychologist.github.io/Analysis-of-air-raid-alerts/)."
     )
 
     st.markdown("#### Will an alert start in the raion within *h* hours?")
-    st.plotly_chart(eval_charts.make_skill_chart(res.bootstrap), use_container_width=True)
-    h = st.radio("Horizon", (1, 3, 6), index=0, horizontal=True, format_func=lambda x: f"{x} h")
+    st.plotly_chart(figs["skill"], use_container_width=True)
     cols = ["model", "n", "brier", "bss", "roc_auc", "roc_auc_within", "pr_auc", "log_loss"]
-    table = res.scores[res.scores["h"] == h][cols].copy()
-    table["model"] = table["model"].map(eval_charts.model_label)
-    st.dataframe(
-        table.rename(columns={"bss": "BSS vs raion rate", "roc_auc_within": "AUC within raion"}).style.format(
-            {c: "{:.3f}" for c in cols[2:]} | {"brier": "{:.4f}", "n": "{:,}"}),
-        hide_index=True, use_container_width=True,
-    )
-    c1, c2 = st.columns(2)
-    with c1:
-        st.plotly_chart(eval_charts.make_reliability_chart(res.reliability, h), use_container_width=True)
-    with c2:
-        st.plotly_chart(eval_charts.make_oblast_skill_chart(res.errors, h), use_container_width=True)
-    st.plotly_chart(eval_charts.make_hourly_fact_chart(res.hourly_series, h), use_container_width=True)
+    for h, tab in zip((1, 3, 6), st.tabs(["h = 1 h", "h = 3 h", "h = 6 h"])):
+        with tab:
+            table = res.scores[res.scores["h"] == h][cols].copy()
+            table["model"] = table["model"].map(eval_charts.model_label)
+            st.dataframe(
+                table.rename(columns={"bss": "BSS vs raion rate", "roc_auc_within": "AUC within raion"})
+                .style.format({c: "{:.3f}" for c in cols[2:]} | {"brier": "{:.4f}", "n": "{:,}"}),
+                hide_index=True, use_container_width=True,
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(figs[f"rel{h}"], use_container_width=True)
+            with c2:
+                st.plotly_chart(figs[f"oblast{h}"], use_container_width=True)
+            st.plotly_chart(figs[f"fact{h}"], use_container_width=True)
 
     st.markdown("#### Daily alerts per raion, 1–7 days ahead")
-    target = st.radio("Target", ("count", "duration"), horizontal=True,
-                      format_func={"count": "Alert count", "duration": "Hours under alert"}.get)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.plotly_chart(eval_charts.make_mase_chart(res.daily, target), use_container_width=True)
-    with c2:
-        st.plotly_chart(eval_charts.make_coverage_chart(res.intervals, target), use_container_width=True)
-    k = st.slider("Days ahead", 1, 7, 1)
-    st.plotly_chart(eval_charts.make_daily_fact_chart(res.daily_series, target, k), use_container_width=True)
+    for target, tab in zip(("count", "duration"), st.tabs(["Alert count", "Hours under alert"])):
+        with tab:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(figs[f"mase_{target}"], use_container_width=True)
+            with c2:
+                st.plotly_chart(figs[f"cov_{target}"], use_container_width=True)
+            st.plotly_chart(figs[f"daily_{target}"], use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
@@ -877,42 +901,52 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    # ── Layout first: the Backtest tab needs no API, so it renders before the data load ──
+    status = st.container()  # loading message / errors
+    kpi_area = st.container()
+    tab_hist, tab_forecast, tab_backtest = st.tabs([
+        "📊 Historical Analytics",
+        "🔮 Forecast & Risk Assessment",
+        "🧪 Backtest",
+    ])
+    with tab_backtest:
+        render_backtest_tab()
+
     # ── Token resolution ─────────────────────────────────────────────────
     api_token = get_api_token()
 
     if not api_token:
-        st.error(
+        status.error(
             "**API Token Missing.**\n\n"
-            "This dashboard requires a valid `ALERTS_API_TOKEN` to function.\n\n"
+            "The live tabs require a valid `ALERTS_API_TOKEN`; the **🧪 Backtest** tab works without it.\n\n"
             "**Local development:** Add your token to `.streamlit/secrets.toml`:\n"
             "```toml\nALERTS_API_TOKEN = \"your_token_here\"\n```\n\n"
             "**Streamlit Cloud:** Set the token in your app's Secrets settings.\n\n"
             "Request a free token at [alerts.in.ua/api-request](https://alerts.in.ua/api-request)."
         )
-        render_backtest_tab()
-        st.stop()
+        return
 
     # ── Data loading ─────────────────────────────────────────────────────
     # Read sidebar state for fetch_history before rendering sidebar
     # (sidebar renders after token check)
     sidebar_fetch_history = st.session_state.get("fetch_history", True)
 
-    loading_placeholder = st.empty()
+    loading_placeholder = status.empty()
     with loading_placeholder.container():
         if sidebar_fetch_history:
             st.info(
                 "⏳ **Loading data…** Fetching historical alerts for all oblasts "
                 "(rate-limited: ~2 requests/min). This may take a few minutes on first load. "
-                "Subsequent loads use a 5-minute cache."
+                "Subsequent loads use a 5-minute cache. "
+                "Meanwhile, the **🧪 Backtest** tab is ready."
             )
 
     try:
         df, api_status = load_data(api_token, fetch_history=sidebar_fetch_history)
     except RuntimeError as exc:
         loading_placeholder.empty()
-        st.error(f"**API Error:** {exc}")
-        render_backtest_tab()
-        st.stop()
+        status.error(f"**API Error:** {exc}")
+        return
 
     loading_placeholder.empty()
 
@@ -925,36 +959,26 @@ def main() -> None:
     )
 
     if df.empty:
-        st.warning(
+        status.warning(
             "No alert data returned. This may mean:\n"
             "- No active alerts currently, and history fetch was disabled\n"
             "- The API returned an empty response\n\n"
             "Try enabling **'Fetch 30-day history'** in the sidebar."
         )
-        st.stop()
+        return
 
     # ── KPI row ───────────────────────────────────────────────────────────
-    daily_all = compute_daily_counts(df)
-    render_kpi_row(df, daily_all, filters["days_range"], api_status["active_count"])
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    with kpi_area:
+        daily_all = compute_daily_counts(df)
+        render_kpi_row(df, daily_all, filters["days_range"], api_status["active_count"])
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Tabs ─────────────────────────────────────────────────────────────
-    tab_hist, tab_forecast, tab_backtest = st.tabs([
-        "📊 Historical Analytics",
-        "🔮 Forecast & Risk Assessment",
-        "🧪 Backtest",
-    ])
-
     with tab_hist:
         render_history_tab(df, filters["selected_oblasts"], filters["days_range"])
 
     with tab_forecast:
         render_forecast_tab(df, filters["selected_oblasts"], filters["forecast_horizon"])
-
-    with tab_backtest:
-        render_backtest_tab()
-
 
 if __name__ == "__main__":
     main()
