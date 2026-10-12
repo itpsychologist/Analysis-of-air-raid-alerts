@@ -16,10 +16,11 @@ Time conventions (PLAN.md 1.2, 3.1):
 
 from __future__ import annotations
 
+import json
 import logging
-import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -455,8 +456,128 @@ def fetch_and_process_data(
 
     # The fetch time: the last day is only observed up to here (see compute_daily_counts)
     df.attrs["as_of"] = pd.Timestamp(now)
+    # Start of the observed history (month_ago = the last 30 days); before it only alerts
+    # still running at fetch time are known, so counts before this point are incomplete
+    df.attrs["history_start"] = pd.Timestamp(now - timedelta(days=HISTORY_DAYS)) if fetch_history else pd.Timestamp(now)
     status["last_updated"] = now
     return df, status
+
+
+# ---------------------------------------------------------------------------
+# Raion alerts: the unit every aggregate below counts
+# ---------------------------------------------------------------------------
+# Since December 2025 alerts are declared mostly per raion, not per oblast, so
+# counting only location_type == "oblast" records misses most alerts. Every
+# aggregate counts *raion alerts* instead: an oblast-level alert puts each raion
+# of the oblast under alert, a raion-level alert its own raion, and overlapping
+# announcements for one raion are merged (the same unit as the forecasting study,
+# src/data/merge.py). Hromada / city-level alerts are not counted; Luhansk oblast
+# (permanent alert since 2022) is excluded.
+
+RAION_ALERT = "raion_alert"  # location_type of rows produced by raion_alerts()
+HISTORY_DAYS = 30  # the month_ago history endpoint
+RAION_UNITS_PATH = Path(__file__).resolve().parent / "src" / "data" / "raion_units.json"
+
+
+def raion_units() -> dict[str, list[str]]:
+    """Raions per oblast (Ukrainian names; Kyiv City has none and is its own unit)."""
+    return json.loads(RAION_UNITS_PATH.read_text(encoding="utf-8"))
+
+
+def raion_count(oblasts_en: Optional[list[str]] = None) -> int:
+    """Number of raion units in the given oblasts (English names), or in the whole country."""
+    units = raion_units()
+    wanted = None if oblasts_en is None else set(oblasts_en)
+    return sum(max(len(rs), 1) for ob, rs in units.items()
+               if wanted is None or OBLAST_EN_MAP.get(ob, ob) in wanted)
+
+
+def raion_alerts(df: pd.DataFrame, as_of: Optional[datetime] = None, by_type: bool = False) -> pd.DataFrame:
+    """
+    Raw API records -> one row per raion alert, in the columns the aggregates use.
+
+    Args:
+        df:      fetch_and_process_data() output.
+        as_of:   fetch time (defaults to df.attrs["as_of"]); alerts still running are
+                 censored here and flagged is_active.
+        by_type: keep alert types apart (for the type breakdown); otherwise a raion
+                 under any alert counts once.
+
+    Returns:
+        DataFrame with location_type = "raion_alert", location_oblast(_en),
+        location_title / location_raion (the raion), alert_type_en, started_at,
+        finished_at (NaT while active), is_active, duration_minutes, n_events and the
+        calendar features of _engineer_features. attrs["as_of"] is kept.
+    """
+    from src.data.merge import RAION_RENAMES, expand_to_raions, union_intervals
+
+    columns = ["id", "location_type", "location_oblast", "location_oblast_en", "location_title",
+               "location_raion", "alert_type_en", "started_at", "finished_at", "is_active",
+               "duration_minutes", "n_events"]
+    as_of = as_of if as_of is not None else df.attrs.get("as_of")
+    if df.empty or "location_type" not in df:
+        out = pd.DataFrame(columns=columns + ["date", "hour_of_day", "day_name"])
+        out.attrs["as_of"] = as_of
+        return out
+    if as_of is None:
+        as_of = df["started_at"].max()
+    as_of = pd.Timestamp(as_of)
+
+    ev = df[df["location_type"].isin(["oblast", "raion"])]
+    raion_name = (ev["location_title"].astype("string").str.replace("’", "'", regex=False)
+                  .replace(RAION_RENAMES))
+    events = pd.DataFrame({
+        "oblast": ev["location_oblast"],
+        "raion": raion_name.where(ev["location_type"] == "raion"),
+        "level": ev["location_type"],
+        "started_at": pd.to_datetime(ev["started_at"], utc=True),
+        "finished_at": pd.to_datetime(ev["finished_at"], utc=True),
+        "type": ev["alert_type_en"] if by_type else "any",
+    })
+    raion_map = {ob: list(rs) for ob, rs in raion_units().items()}
+    seen = events.loc[events["level"] == "raion", ["oblast", "raion"]].dropna().drop_duplicates()
+    for ob, r in seen.itertuples(index=False):  # a raion missing from the static list still counts
+        if r not in raion_map.setdefault(ob, []):
+            raion_map[ob].append(r)
+
+    parts = []
+    for alert_type, g in events.groupby("type"):
+        units = expand_to_raions(g, raion_map).assign(type=alert_type)
+        parts.append(units)
+    if not parts:
+        out = pd.DataFrame(columns=columns + ["date", "hour_of_day", "day_name"])
+        out.attrs["as_of"] = as_of
+        return out
+    units = pd.concat(parts, ignore_index=True)
+    units["key"] = units["unit"] + "\x1f" + units["type"] + "\x1f" + units["oblast"]
+    merged = union_intervals(units[["key", "started_at", "finished_at"]], "key", open_until=as_of)
+    merged[["unit", "type", "oblast"]] = merged["key"].str.split("\x1f", expand=True)
+
+    out = pd.DataFrame({
+        "id": np.arange(len(merged)),
+        "location_type": RAION_ALERT,
+        "location_oblast": merged["oblast"],
+        "location_oblast_en": merged["oblast"].map(lambda o: OBLAST_EN_MAP.get(o, o)),
+        "location_title": merged["unit"],
+        "location_raion": merged["unit"],
+        "alert_type_en": merged["type"] if by_type else "Any",
+        "started_at": merged["started_at"],
+        "finished_at": merged["finished_at"].where(merged["finished_at"] < as_of),
+        "is_active": merged["finished_at"] >= as_of,
+        "duration_minutes": (merged["finished_at"].clip(upper=as_of) - merged["started_at"]).dt.total_seconds() / 60,
+        "n_events": merged["n_events"],
+    })
+    out = _engineer_features(out.sort_values("started_at").reset_index(drop=True))
+    out["date"] = pd.to_datetime(out["date"])
+    out.attrs = {**df.attrs, "as_of": as_of}
+    return out
+
+
+def _raion_level(df: pd.DataFrame) -> pd.DataFrame:
+    """Raion alerts as they are, raw records converted (see raion_alerts)."""
+    if "location_type" in df and not df.empty and (df["location_type"] == RAION_ALERT).all():
+        return df
+    return raion_alerts(df)
 
 
 def mean_finished_duration(df: pd.DataFrame) -> float:
@@ -475,14 +596,14 @@ def compute_daily_counts(
     Aggregate alert counts and average duration by Kyiv-local date.
 
     Args:
-        df:                 Processed alerts DataFrame from fetch_and_process_data.
+        df:                 raion_alerts() output, or raw records (converted here).
         oblast_filter:      If provided, filter to only these English oblast names.
         alert_type_filter:  If provided, filter to only these alert_type_en values.
         as_of:              Fetch time; defaults to df.attrs["as_of"] (set by the ETL).
 
     Returns:
         DataFrame with columns:
-            date, count, avg_duration_minutes (finished alerts only),
+            date, count (raion alerts started that Kyiv day), avg_duration_minutes (finished alerts only),
             total_duration_minutes (known part, up to as_of), rolling_7d_avg,
             is_complete — False for the first day (the history window starts
             mid-day) and for the day of as_of (still running). Forecasting must
@@ -493,15 +614,13 @@ def compute_daily_counts(
         # Conservative fallback: treat the day of the latest alert as still running
         logger.warning("compute_daily_counts: no as_of; marking the last day incomplete")
         as_of = df["started_at"].max()
-    data = df.copy()
+    # Count raion alerts (an oblast-level record alone misses most alerts since Dec 2025)
+    data = _raion_level(df) if not alert_type_filter else raion_alerts(df, by_type=True)
 
     if oblast_filter:
         data = data[data["location_oblast_en"].isin(oblast_filter)]
     if alert_type_filter:
         data = data[data["alert_type_en"].isin(alert_type_filter)]
-
-    # Filter to oblast-level for clean non-overlapping counts
-    data = data[data["location_type"] == "oblast"]
 
     finished_duration = data["duration_minutes"].where(~data["is_active"].astype(bool)) if "is_active" in data else data["duration_minutes"]
     daily = (
@@ -558,21 +677,19 @@ def compute_heatmap_data(
     oblast_filter: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     """
-    Build a pivot table of alert counts by hour-of-day × day-of-week.
+    Build a pivot table of raion-alert starts by hour-of-day × day-of-week (Kyiv time).
 
     Args:
-        df:             Processed alerts DataFrame.
+        df:             raion_alerts() output, or raw records (converted here).
         oblast_filter:  If provided, filter to only these English oblast names.
 
     Returns:
         Pivot DataFrame with shape (7, 24): rows = day of week (Mon–Sun),
         columns = hour of day (0–23), values = alert count.
     """
-    data = df.copy()
+    data = _raion_level(df)
     if oblast_filter:
         data = data[data["location_oblast_en"].isin(oblast_filter)]
-
-    data = data[data["location_type"] == "oblast"]
 
     if data.empty:
         return pd.DataFrame(
@@ -605,44 +722,54 @@ def compute_vulnerability_score(
     oblast_filter: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     """
-    Compute a normalized vulnerability score per oblast.
+    Compute a normalized vulnerability score per oblast, per raion so that oblasts
+    with many raions are not favoured.
 
     Score formula:
-        vulnerability = (alert_count / max_count) * 0.6
-                       + (avg_duration / max_avg_dur) * 0.4
+        vulnerability = (alerts_per_raion / max) * 0.6
+                       + (share_under_alert / max) * 0.4
+
+    where alerts_per_raion = raion alerts / raions in the oblast, and
+    share_under_alert = raion-hours under alert / (raions x hours in the window).
 
     Args:
-        df:             Processed alerts DataFrame.
+        df:             raion_alerts() output, or raw records (converted here).
         oblast_filter:  If provided, filter to only these English oblast names.
 
     Returns:
-        DataFrame with columns: location_oblast_en, alert_count,
-        avg_duration_minutes, vulnerability_score. Sorted descending by score.
+        DataFrame with columns: location_oblast_en, alert_count, alerts_per_raion,
+        share_under_alert, avg_duration_minutes, vulnerability_score. Sorted descending by score.
     """
-    data = df[df["location_type"] == "oblast"].copy()
+    cols = ["location_oblast_en", "alert_count", "alerts_per_raion", "share_under_alert",
+            "avg_duration_minutes", "vulnerability_score"]
+    data = _raion_level(df)
     if oblast_filter:
         data = data[data["location_oblast_en"].isin(oblast_filter)]
-
     if data.empty:
-        return pd.DataFrame(columns=["location_oblast_en", "alert_count", "avg_duration_minutes", "vulnerability_score"])
+        return pd.DataFrame(columns=cols)
 
-    finished_duration = data["duration_minutes"].where(~data["is_active"].astype(bool)) if "is_active" in data else data["duration_minutes"]
+    as_of = data.attrs.get("as_of") or data["started_at"].max()
+    window_minutes = max((pd.Timestamp(as_of) - data["started_at"].min()).total_seconds() / 60, 1.0)
+    finished_duration = data["duration_minutes"].where(~data["is_active"].astype(bool))
     agg = (
         data.assign(finished_duration=finished_duration)
         .groupby("location_oblast_en")
         .agg(
             alert_count=("id", "count"),
+            minutes=("duration_minutes", "sum"),
             avg_duration_minutes=("finished_duration", "mean"),
         )
         .reset_index()
     )
+    n_raions = agg["location_oblast_en"].map(lambda ob: raion_count([ob])).clip(lower=1)
+    agg["alerts_per_raion"] = agg["alert_count"] / n_raions
+    agg["share_under_alert"] = (agg["minutes"] / (n_raions * window_minutes)).clip(upper=1)
 
-    max_count = agg["alert_count"].max() or 1
-    max_dur = agg["avg_duration_minutes"].max() or 1
-
+    max_rate = agg["alerts_per_raion"].max() or 1
+    max_share = agg["share_under_alert"].max() or 1
     agg["vulnerability_score"] = (
-        (agg["alert_count"] / max_count) * 0.6
-        + (agg["avg_duration_minutes"].fillna(0) / max_dur) * 0.4
+        (agg["alerts_per_raion"] / max_rate) * 0.6
+        + (agg["share_under_alert"] / max_share) * 0.4
     ).round(4)
 
-    return agg.sort_values("vulnerability_score", ascending=False).reset_index(drop=True)
+    return agg[cols].sort_values("vulnerability_score", ascending=False).reset_index(drop=True)

@@ -143,15 +143,20 @@ A new data snapshot does not move the frozen test window. `run_final_test.py` re
 |---|---|
 | **Live Active Alerts** | Real-time alert count fetched every 5 minutes |
 | **30-Day Historical Data** | Per-oblast history via the regional history endpoint |
-| **KPI Metrics Panel** | Total alerts, avg/max duration, affected oblasts, delta vs previous window |
-| **Daily Trend Chart** | Bar + 7-day MA + OLS trendline |
-| **Diurnal Heatmap** | Hour of Day × Day of Week alert frequency |
+| **KPI Metrics Panel** | Raion alerts, avg/max duration, affected oblasts, raions under alert now; delta vs the previous window when it is covered by the history |
+| **Daily Trend Chart** | Raion alerts per day: bar + 7-day MA + OLS trendline |
+| **Diurnal Heatmap** | Hour of Day × Day of Week of raion-alert starts (Kyiv time) |
 | **Alert Type Breakdown** | Horizontal bar by type with avg duration |
-| **Vulnerability Ranking** | Weighted score: 60% frequency + 40% duration |
+| **Vulnerability Ranking** | Per raion, so large oblasts are not favoured: 60% alerts per raion + 40% share of time under alert |
 | **7-Day Forecast** | Holt-Winters (primary) or Ridge Regression (fallback) with 95% CI ribbon |
-| **Risk Gauge** | Per-region risk score visualised as a gauge chart |
+| **Risk Gauge** | Risk from the forecast per raion (comparable across oblasts of different size) |
 | **Multi-Oblast Risk Map** | Side-by-side forecast scores for all selected regions |
 | **🧪 Backtest tab** | Final-test results of the forecasting study: skill with CIs, calibration, forecast vs actual (no token needed) |
+
+> **What is counted.** Since December 2025 alerts are declared mostly per raion, not per oblast. All dashboard
+> figures therefore count **raion alerts**: an oblast-wide alert counts once for each raion of the oblast, a
+> raion alert for its raion, and overlapping announcements for one raion count once (`etl.raion_alerts`).
+> Hromada- and city-level alerts are not counted, and Luhansk oblast (under permanent alert since 2022) is excluded.
 
 ---
 

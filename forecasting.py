@@ -339,20 +339,23 @@ def compute_per_oblast_forecast(
 
 def compute_risk_forecast_score(
     forecast_df: pd.DataFrame,
+    n_units: int = 1,
 ) -> float:
     """
     Derive a single risk score for the upcoming forecast window.
 
-    Score = mean forecast / (mean forecast + 1) scaled to [0, 1].
+    Score = r / (r + 1) in [0, 1], where r is the mean forecast per unit
+    (raion alerts per raion per day when n_units is the number of raions).
     Higher score → higher predicted alert frequency.
 
     Args:
         forecast_df: Output of train_and_forecast().
+        n_units:     Number of units the forecast is summed over.
 
     Returns:
         Float in [0, 1].
     """
     if forecast_df.empty:
         return 0.0
-    mean_fc = forecast_df["forecast"].mean()
+    mean_fc = forecast_df["forecast"].mean() / max(n_units, 1)
     return float(mean_fc / (mean_fc + 1)) if mean_fc >= 0 else 0.0

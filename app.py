@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 from etl import (
     OBLAST_EN_MAP,
+    raion_alerts,
+    raion_count,
     compute_daily_counts,
     mean_finished_duration,
     compute_heatmap_data,
@@ -238,7 +240,7 @@ def get_api_token() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_data(api_token: str, fetch_history: bool) -> tuple[pd.DataFrame, dict]:
+def load_data(api_token: str, fetch_history: bool) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """
     Cache-wrapped ETL entry point.
     TTL = 300s (5 minutes) to respect API rate limits.
@@ -248,9 +250,11 @@ def load_data(api_token: str, fetch_history: bool) -> tuple[pd.DataFrame, dict]:
         fetch_history: Whether to pull 30-day per-oblast history.
 
     Returns:
-        Tuple of (processed DataFrame, status dict).
+        (raw records, raion alerts, raion alerts by type, status dict). Every aggregate
+        counts raion alerts (etl.raion_alerts): since Dec 2025 most alerts are raion-level.
     """
-    return fetch_and_process_data(api_token, fetch_history=fetch_history)
+    df, status = fetch_and_process_data(api_token, fetch_history=fetch_history)
+    return df, raion_alerts(df), raion_alerts(df, by_type=True), status
 
 
 @st.cache_resource(show_spinner=False)
@@ -431,7 +435,7 @@ def render_kpi_row(
     Computes current-window KPIs and delta vs previous equivalent window.
 
     Args:
-        df:           Full processed alerts DataFrame.
+        df:           Raion alerts (etl.raion_alerts).
         daily_df:     Daily aggregated counts.
         days_range:   Number of days in the current analysis window.
         active_count: Live active alert count from API.
@@ -440,15 +444,17 @@ def render_kpi_row(
     cutoff_current = pd.Timestamp(now - timedelta(days=days_range))
     cutoff_previous = pd.Timestamp(now - timedelta(days=days_range * 2))
 
-    oblast_df = df[df["location_type"] == "oblast"].copy()
-    current = oblast_df[oblast_df["started_at"] >= cutoff_current]
-    previous = oblast_df[
-        (oblast_df["started_at"] >= cutoff_previous)
-        & (oblast_df["started_at"] < cutoff_current)
-    ]
+    current = df[df["started_at"] >= cutoff_current]
+    previous = df[(df["started_at"] >= cutoff_previous) & (df["started_at"] < cutoff_current)]
+    raions_now = df.loc[df["is_active"].astype(bool), "location_title"].nunique()
+
+    # The history covers ~30 days, so the previous window is often only partly observed:
+    # a delta against it would compare a full window with a fragment
+    history_start = df.attrs.get("history_start")
+    previous_observed = history_start is not None and pd.Timestamp(history_start) <= cutoff_previous
 
     def safe_delta(curr_val: float, prev_val: float) -> Optional[float]:
-        if prev_val == 0:
+        if prev_val == 0 or not previous_observed:
             return None
         return round(curr_val - prev_val, 1)
 
@@ -464,11 +470,12 @@ def render_kpi_row(
 
     with col1:
         st.metric(
-            label="🚨 Total Alerts",
+            label="🚨 Raion Alerts",
             value=f"{total_alerts:,}",
             delta=safe_delta(total_alerts, prev_total),
             delta_color="inverse",
-            help=f"Total alerts in the last {days_range} days",
+            help=f"Alerts in the last {days_range} days, counted per raion: an oblast-wide alert counts "
+                 "once for each of its raions, overlapping announcements for one raion count once",
         )
     with col2:
         st.metric(
@@ -476,27 +483,27 @@ def render_kpi_row(
             value=f"{avg_duration:.0f} min" if avg_duration else "N/A",
             delta=safe_delta(avg_duration, prev_avg_dur),
             delta_color="inverse",
-            help="Average alert duration in minutes",
+            help="Average duration of finished raion alerts, in minutes",
         )
     with col3:
         max_dur_hours = max_duration / 60 if max_duration else 0
         st.metric(
             label="🔥 Max Duration",
             value=f"{max_dur_hours:.1f} hr" if max_duration else "N/A",
-            help="Longest single alert duration in the window",
+            help="Longest raion alert in the window",
         )
     with col4:
         st.metric(
             label="🗺️ Affected Oblasts",
             value=f"{unique_oblasts}",
-            help=f"Unique oblasts with alerts in the last {days_range} days",
+            help=f"Oblasts with at least one raion alert in the last {days_range} days",
         )
     with col5:
         st.metric(
-            label="⚡ Active Now",
-            value=f"{active_count}",
+            label="⚡ Raions Under Alert",
+            value=f"{raions_now} / {raion_count()}",
             delta=None,
-            help="Currently active alerts (live from API)",
+            help=f"Raions under alert now (live from API; {active_count} active API records incl. hromadas)",
         )
 
 
@@ -504,8 +511,21 @@ def render_kpi_row(
 # Tab 1: Historical Analytics
 # ---------------------------------------------------------------------------
 
+def _window(df: pd.DataFrame, selected_oblasts: list[str], days_range: int) -> pd.DataFrame:
+    """Rows started in the last `days_range` days in the selected oblasts (attrs kept)."""
+    cutoff = pd.Timestamp(datetime.now(timezone.utc) - timedelta(days=days_range))
+    out = df[df["started_at"] >= cutoff]
+    if len(selected_oblasts) < len(OBLAST_EN_MAP):
+        out = out[out["location_oblast_en"].isin(selected_oblasts)]
+    out = out.copy()
+    out.attrs = dict(df.attrs)
+    return out
+
+
 def render_history_tab(
     df: pd.DataFrame,
+    df_types: pd.DataFrame,
+    raw: pd.DataFrame,
     selected_oblasts: list[str],
     days_range: int,
 ) -> None:
@@ -513,18 +533,13 @@ def render_history_tab(
     Render the historical analytics tab with trend, heatmap, and type breakdown.
 
     Args:
-        df:               Full processed alerts DataFrame.
+        df:               Raion alerts (etl.raion_alerts).
+        df_types:         Raion alerts with alert types kept apart (by_type=True).
+        raw:              Raw API records, for the raw data table.
         selected_oblasts: User-selected oblast filter.
         days_range:       Analysis window in days.
     """
-    # Apply time filter
-    now = datetime.now(timezone.utc)
-    cutoff = pd.Timestamp(now - timedelta(days=days_range))
-    df_filtered = df[df["started_at"] >= cutoff].copy()
-
-    # Apply oblast filter
-    if len(selected_oblasts) < len(OBLAST_EN_MAP):
-        df_filtered = df_filtered[df_filtered["location_oblast_en"].isin(selected_oblasts)]
+    df_filtered = _window(df, selected_oblasts, days_range)
 
     if df_filtered.empty:
         st.warning("No alert data available for the selected filters and time window.")
@@ -559,7 +574,7 @@ def render_history_tab(
 
     with col_types:
         st.plotly_chart(
-            make_alert_type_chart(df_filtered),
+            make_alert_type_chart(_window(df_types, selected_oblasts, days_range)),
             use_container_width=True,
             key="type_chart",
         )
@@ -582,8 +597,9 @@ def render_history_tab(
             "started_at", "location_oblast_en", "alert_type_en",
             "duration_minutes", "is_active", "location_raion",
         ]
-        available_cols = [c for c in display_cols if c in df_filtered.columns]
-        show_df = df_filtered[available_cols].copy()
+        raw_filtered = _window(raw, selected_oblasts, days_range)
+        available_cols = [c for c in display_cols if c in raw_filtered.columns]
+        show_df = raw_filtered[available_cols].copy()
         show_df["started_at"] = show_df["started_at"].dt.strftime("%Y-%m-%d %H:%M UTC")
         if "duration_minutes" in show_df.columns:
             show_df["duration_minutes"] = show_df["duration_minutes"].round(1)
@@ -614,7 +630,7 @@ def render_forecast_tab(
     Render the predictive forecasting tab with regional and national forecasts.
 
     Args:
-        df:               Full processed alerts DataFrame.
+        df:               Raion alerts (etl.raion_alerts).
         selected_oblasts: User-selected oblast filter.
         forecast_horizon: Number of days to forecast.
     """
@@ -676,7 +692,9 @@ def render_forecast_tab(
         st.error(f"Forecast computation failed: {exc}")
         return
 
-    risk_score = compute_risk_forecast_score(forecast_df)
+    # Risk from the forecast per raion, so oblasts of different size are comparable
+    n_raions = raion_count(None if is_national else [forecast_oblast])
+    risk_score = compute_risk_forecast_score(forecast_df, n_units=n_raions)
 
     # ── Forecast summary row ──────────────────────────────────────────────
     with col_info:
@@ -697,7 +715,7 @@ def render_forecast_tab(
                 <b style='color:#FAFAFA'>Horizon:</b>
                 <span style='color:#FFD700'> {forecast_horizon} days</span> &nbsp;|&nbsp;
                 <b style='color:#FAFAFA'>Predicted Mean:</b>
-                <span style='color:#FF4B4B'> {fc_mean:.1f} alerts/day</span> &nbsp;|&nbsp;
+                <span style='color:#FF4B4B'> {fc_mean:.1f} raion alerts/day</span> &nbsp;|&nbsp;
                 <b style='color:#FAFAFA'>Predicted Peak:</b>
                 <span style='color:#FF4B4B'> {fc_max:.1f}</span>
             </div>
@@ -942,7 +960,7 @@ def main() -> None:
             )
 
     try:
-        df, api_status = load_data(api_token, fetch_history=sidebar_fetch_history)
+        raw_df, df, df_types, api_status = load_data(api_token, fetch_history=sidebar_fetch_history)
     except RuntimeError as exc:
         loading_placeholder.empty()
         status.error(f"**API Error:** {exc}")
@@ -975,7 +993,7 @@ def main() -> None:
 
     # ── Tabs ─────────────────────────────────────────────────────────────
     with tab_hist:
-        render_history_tab(df, filters["selected_oblasts"], filters["days_range"])
+        render_history_tab(df, df_types, raw_df, filters["selected_oblasts"], filters["days_range"])
 
     with tab_forecast:
         render_forecast_tab(df, filters["selected_oblasts"], filters["forecast_horizon"])

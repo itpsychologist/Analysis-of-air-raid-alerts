@@ -57,7 +57,7 @@ def make_trend_chart(
         name="Daily Alerts",
         marker_color=COLOUR_PRIMARY,
         marker_opacity=0.75,
-        hovertemplate="<b>%{x|%d %b %Y}</b><br>Alerts: %{y}<extra></extra>",
+        hovertemplate="<b>%{x|%d %b %Y}</b><br>Raion alerts: %{y}<extra></extra>",
     ))
 
     # Line: 7-day rolling average
@@ -92,9 +92,9 @@ def make_trend_chart(
     )
 
     fig.update_layout(
-        title=dict(text=f"Daily Alert Count — {region_label}", font=dict(size=16, color="#FAFAFA")),
+        title=dict(text=f"Daily Raion Alerts — {region_label}", font=dict(size=16, color="#FAFAFA")),
         xaxis_title="Date",
-        yaxis_title="Number of Alerts",
+        yaxis_title="Raion alerts",
         template=PLOTLY_TEMPLATE,
         paper_bgcolor=PLOTLY_PAPER_BG,
         plot_bgcolor=PLOTLY_BG,
@@ -129,7 +129,7 @@ def make_heatmap_chart(pivot_df: pd.DataFrame) -> go.Figure:
             [0.85, "#CC2200"],
             [1.0, "#FF4B4B"],
         ],
-        hovertemplate="<b>%{y}, %{x}</b><br>Alerts: %{z}<extra></extra>",
+        hovertemplate="<b>%{y}, %{x}</b><br>Raion alert starts: %{z}<extra></extra>",
         colorbar=dict(
             title="Alert Count",
             titlefont=dict(color="#FAFAFA"),
@@ -156,14 +156,13 @@ def make_alert_type_chart(df: pd.DataFrame) -> go.Figure:
     Build a horizontal bar chart of alert types by count and avg duration.
 
     Args:
-        df: Processed alerts DataFrame.
+        df: Raion alerts with types kept apart (etl.raion_alerts(by_type=True)).
 
     Returns:
         Plotly Figure.
     """
     type_stats = (
-        df[df["location_type"] == "oblast"]
-        .groupby("alert_type_en")
+        df.groupby("alert_type_en")
         .agg(
             count=("id", "count"),
             avg_duration=("duration_minutes", "mean"),
@@ -192,14 +191,14 @@ def make_alert_type_chart(df: pd.DataFrame) -> go.Figure:
         customdata=type_stats["avg_duration"].round(1),
         hovertemplate=(
             "<b>%{y}</b><br>"
-            "Count: %{x}<br>"
+            "Raion alerts: %{x}<br>"
             "Avg Duration: %{customdata} min<extra></extra>"
         ),
     ))
 
     fig.update_layout(
         title=dict(text="Alert Type Distribution", font=dict(size=16, color="#FAFAFA")),
-        xaxis_title="Number of Alerts",
+        xaxis_title="Raion alerts",
         yaxis_title="",
         template=PLOTLY_TEMPLATE,
         paper_bgcolor=PLOTLY_PAPER_BG,
@@ -247,11 +246,14 @@ def make_vulnerability_chart(vuln_df: pd.DataFrame) -> go.Figure:
         customdata=np.column_stack([
             df_sorted["alert_count"],
             df_sorted["avg_duration_minutes"].round(1),
+            df_sorted["alerts_per_raion"].round(1),
+            (df_sorted["share_under_alert"] * 100).round(1),
         ]),
         hovertemplate=(
             "<b>%{y}</b><br>"
             "Vulnerability Score: %{x:.3f}<br>"
-            "Total Alerts: %{customdata[0]}<br>"
+            "Raion alerts: %{customdata[0]} (%{customdata[2]} per raion)<br>"
+            "Time under alert: %{customdata[3]}%<br>"
             "Avg Duration: %{customdata[1]} min<extra></extra>"
         ),
     ))

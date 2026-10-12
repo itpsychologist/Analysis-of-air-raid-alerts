@@ -186,7 +186,8 @@ def expand_to_raions(events: pd.DataFrame, raion_map: dict[str, list[str]]) -> p
     broadcast = oblast_ev.merge(units, on="oblast", how="left")
     broadcast["unit"] = broadcast["unit"].fillna(broadcast["oblast"])  # e.g. м. Київ
     cols = ["unit", "oblast", "started_at", "finished_at"]
-    out = pd.concat([raion_ev[cols], broadcast[cols]], ignore_index=True)
+    parts = [p[cols] for p in (raion_ev, broadcast) if not p.empty]
+    out = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=cols)
     return out.dropna(subset=["unit"])
 
 
