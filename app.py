@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Local module imports (after page config)
 # ---------------------------------------------------------------------------
 from etl import (
-    OBLAST_EN_MAP,
+    counted_oblasts_en,
     raion_alerts,
     raion_count,
     compute_daily_counts,
@@ -290,7 +290,7 @@ def get_forecast(
 def render_sidebar(
     api_ok: bool,
     last_updated: Optional[datetime],
-    active_count: int,
+    raions_now: int,
     history_failures: Optional[dict] = None,
 ) -> dict:
     """
@@ -299,7 +299,7 @@ def render_sidebar(
     Args:
         api_ok:           Whether the API connection was successful.
         last_updated:      Timestamp of the last successful data fetch.
-        active_count:      Number of currently active alerts from the API.
+        raions_now:        Raions under alert now (as in the KPI row).
         history_failures:  Dict of {oblast_en: reason} for oblasts whose
                             history fetch failed or returned nothing, as
                             reported by etl.fetch_and_process_data().
@@ -326,9 +326,10 @@ def render_sidebar(
                 unsafe_allow_html=True,
             )
 
-        if active_count > 0:
+        if raions_now > 0:
             st.markdown(
-                f'<div class="active-alert-banner">⚠️ <b>{active_count}</b> active alerts right now</div>',
+                f'<div class="active-alert-banner">⚠️ <b>{raions_now}</b> of {raion_count()} raions '
+                'under alert right now</div>',
                 unsafe_allow_html=True,
             )
 
@@ -346,7 +347,7 @@ def render_sidebar(
 
         # Oblast multiselect
         st.markdown("### 🗺️ Region Filter")
-        all_oblasts = sorted(OBLAST_EN_MAP.values())
+        all_oblasts = counted_oblasts_en()  # Luhansk (permanent alert) is not counted anywhere
         selected_oblasts = st.multiselect(
             "Select Oblasts",
             options=all_oblasts,
@@ -511,11 +512,16 @@ def render_kpi_row(
 # Tab 1: Historical Analytics
 # ---------------------------------------------------------------------------
 
+def _oblast_filter(selected_oblasts: list[str]) -> Optional[list[str]]:
+    """The oblast filter to apply, or None when every counted oblast is selected."""
+    return None if set(selected_oblasts) >= set(counted_oblasts_en()) else selected_oblasts
+
+
 def _window(df: pd.DataFrame, selected_oblasts: list[str], days_range: int) -> pd.DataFrame:
     """Rows started in the last `days_range` days in the selected oblasts (attrs kept)."""
     cutoff = pd.Timestamp(datetime.now(timezone.utc) - timedelta(days=days_range))
     out = df[df["started_at"] >= cutoff]
-    if len(selected_oblasts) < len(OBLAST_EN_MAP):
+    if _oblast_filter(selected_oblasts):
         out = out[out["location_oblast_en"].isin(selected_oblasts)]
     out = out.copy()
     out.attrs = dict(df.attrs)
@@ -548,7 +554,7 @@ def render_history_tab(
     # Daily counts for the filtered window
     daily = compute_daily_counts(
         df_filtered,
-        oblast_filter=selected_oblasts if len(selected_oblasts) < len(OBLAST_EN_MAP) else None,
+        oblast_filter=_oblast_filter(selected_oblasts),
     )
 
     # ── Row 1: Trend chart ────────────────────────────────────────────────
@@ -564,7 +570,7 @@ def render_history_tab(
     with col_heat:
         pivot = compute_heatmap_data(
             df_filtered,
-            oblast_filter=selected_oblasts if len(selected_oblasts) < len(OBLAST_EN_MAP) else None,
+            oblast_filter=_oblast_filter(selected_oblasts),
         )
         st.plotly_chart(
             make_heatmap_chart(pivot),
@@ -583,7 +589,7 @@ def render_history_tab(
     st.markdown("### Oblast Vulnerability Ranking")
     vuln = compute_vulnerability_score(
         df_filtered,
-        oblast_filter=selected_oblasts if len(selected_oblasts) < len(OBLAST_EN_MAP) else None,
+        oblast_filter=_oblast_filter(selected_oblasts),
     )
     st.plotly_chart(
         make_vulnerability_chart(vuln),
@@ -853,7 +859,7 @@ def render_backtest_tab() -> None:
 
     Needs no API: it is rendered before the data load. The horizon / target choices
     are nested tabs, which switch in the browser without a rerun, so the tab stays
-    interactive while the (rate-limited, ~13 min) history load is still running.
+    interactive while the (rate-limited, ~12 min) history load is still running.
     """
     res = get_results()
     if res is None:
@@ -969,10 +975,11 @@ def main() -> None:
     loading_placeholder.empty()
 
     # ── Sidebar ───────────────────────────────────────────────────────────
+    raions_now = df.loc[df["is_active"].astype(bool), "location_title"].nunique() if not df.empty else 0
     filters = render_sidebar(
         api_ok=api_status["api_ok"],
         last_updated=api_status.get("last_updated"),
-        active_count=api_status.get("active_count", 0),
+        raions_now=raions_now,
         history_failures=api_status.get("history_failures", {}),
     )
 

@@ -259,7 +259,7 @@ The alerts.in.ua API enforces the following limits:
 
 The app handles this automatically:
 - **Active alerts:** Cached for 5 minutes (`@st.cache_data(ttl=300)`).
-- **History:** Fetched once per session with a 31-second inter-request delay. Loading all 25 oblasts takes ~13 minutes on first load. Subsequent loads use the cache.
+- **History:** Fetched once per session with a 31-second inter-request delay. Loading 24 oblasts (Luhansk, under permanent alert, is skipped) takes ~12 minutes on first load. Subsequent loads use the cache.
 - **Toggle:** Disable "Fetch 30-day history" in the sidebar for instant load (active alerts only).
 
 ---

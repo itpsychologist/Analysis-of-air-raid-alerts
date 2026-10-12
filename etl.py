@@ -354,10 +354,10 @@ def fetch_and_process_data(
     then merges, cleans, and engineers features across both datasets.
 
     Note on history fetching rate limits:
-        The history endpoint allows only 2 req/min. For 25 oblasts,
-        this means ~12.5 minutes of sequential fetching with 30s delays.
-        In practice, we fetch only oblast-level records (location_type == "oblast")
-        to minimise API calls while maximising analytical coverage.
+        The history endpoint allows only 2 req/min. For the 24 counted oblasts
+        (Luhansk is skipped), this means ~12 minutes of sequential fetching with
+        31 s delays. Each response holds alerts of every level (oblast, raion,
+        hromada, city); the aggregates count raion alerts (see raion_alerts).
 
     Args:
         api_token:         Valid Bearer token for alerts.in.ua API.
@@ -399,7 +399,10 @@ def fetch_and_process_data(
 
     # ── Step 2: Fetch historical data per oblast ─────────────────────────────
     if fetch_history:
-        oblasts = list(OBLAST_UID_MAP.items())
+        # Only oblasts the aggregates count: Luhansk (permanent alert since 2022) is
+        # excluded from every figure, so its history request would only cost 31 s
+        counted = set(raion_units())
+        oblasts = [(name, uid) for name, uid in OBLAST_UID_MAP.items() if name in counted]
         total = len(oblasts)
         for idx, (oblast_name, uid) in enumerate(oblasts):
             if progress_callback is not None:
@@ -482,6 +485,11 @@ RAION_UNITS_PATH = Path(__file__).resolve().parent / "src" / "data" / "raion_uni
 def raion_units() -> dict[str, list[str]]:
     """Raions per oblast (Ukrainian names; Kyiv City has none and is its own unit)."""
     return json.loads(RAION_UNITS_PATH.read_text(encoding="utf-8"))
+
+
+def counted_oblasts_en() -> list[str]:
+    """English names of the oblasts the aggregates count (Luhansk is excluded), sorted."""
+    return sorted(OBLAST_EN_MAP.get(ob, ob) for ob in raion_units())
 
 
 def raion_count(oblasts_en: Optional[list[str]] = None) -> int:

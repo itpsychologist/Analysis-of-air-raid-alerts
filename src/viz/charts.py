@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from etl import OBLAST_EN_MAP
+from etl import OBLAST_EN_MAP, counted_oblasts_en
 
 # ---------------------------------------------------------------------------
 # Colour palette constants
@@ -41,44 +41,63 @@ def make_trend_chart(
     """
     Build a bar + moving-average line combination chart for daily alert counts.
 
+    Days with is_complete == False are partial: the first day of the window (the
+    history starts mid-day) is left out, and today (still running) is drawn paler
+    and kept out of the 7-day average and the trend line, so neither looks like a drop.
+
     Args:
-        daily_df:         Daily aggregated counts DataFrame.
+        daily_df:         Daily aggregated counts DataFrame (etl.compute_daily_counts).
         selected_oblasts: List of selected oblast English names (for title).
 
     Returns:
         Plotly Figure object.
     """
     fig = go.Figure()
+    daily_df = daily_df.reset_index(drop=True)
+    complete = daily_df["is_complete"].astype(bool) if "is_complete" in daily_df else pd.Series(True, index=daily_df.index)
+    first_complete = complete.idxmax() if complete.any() else len(daily_df)
+    shown = daily_df.iloc[first_complete:]  # drop the partial day(s) at the start of the window
+    full = shown[complete.loc[shown.index]]
+    partial = shown[~complete.loc[shown.index]]
 
     # Bar: daily raw counts
     fig.add_trace(go.Bar(
-        x=daily_df["date"],
-        y=daily_df["count"],
+        x=full["date"],
+        y=full["count"],
         name="Daily Alerts",
         marker_color=COLOUR_PRIMARY,
         marker_opacity=0.75,
         hovertemplate="<b>%{x|%d %b %Y}</b><br>Raion alerts: %{y}<extra></extra>",
     ))
+    if not partial.empty:
+        fig.add_trace(go.Bar(
+            x=partial["date"],
+            y=partial["count"],
+            name="Today (so far)",
+            marker_color=COLOUR_PRIMARY,
+            marker_opacity=0.3,
+            hovertemplate="<b>%{x|%d %b %Y}</b><br>Raion alerts so far: %{y}<extra></extra>",
+        ))
 
-    # Line: 7-day rolling average
-    if "rolling_7d_avg" in daily_df.columns:
+    # Line: 7-day rolling average of complete days
+    if len(full) > 0:
         fig.add_trace(go.Scatter(
-            x=daily_df["date"],
-            y=daily_df["rolling_7d_avg"],
+            x=full["date"],
+            y=full["count"].rolling(window=7, min_periods=1).mean(),
             name="7-Day Avg",
             line=dict(color=COLOUR_ACCENT, width=2.5, dash="solid"),
             mode="lines",
             hovertemplate="<b>%{x|%d %b %Y}</b><br>7d Avg: %{y:.1f}<extra></extra>",
         ))
 
-    # Trendline via OLS (linear)
-    if len(daily_df) > 3:
-        x_numeric = np.arange(len(daily_df))
-        y_vals = daily_df["count"].fillna(0).values
+    # Trendline via OLS (linear), complete days only
+    if len(full) > 3:
+        x_numeric = np.arange(len(full))
+        y_vals = full["count"].fillna(0).values
         coeffs = np.polyfit(x_numeric, y_vals, deg=1)
         trendline = np.polyval(coeffs, x_numeric)
         fig.add_trace(go.Scatter(
-            x=daily_df["date"],
+            x=full["date"],
             y=trendline,
             name="OLS Trend",
             line=dict(color=COLOUR_SECONDARY, width=1.5, dash="dot"),
@@ -87,7 +106,7 @@ def make_trend_chart(
         ))
 
     region_label = (
-        "All Oblasts" if len(selected_oblasts) == len(OBLAST_EN_MAP)
+        "All Oblasts" if set(selected_oblasts) >= set(counted_oblasts_en())
         else ", ".join(selected_oblasts[:3]) + ("…" if len(selected_oblasts) > 3 else "")
     )
 

@@ -74,7 +74,7 @@ Open alerts are closed at the data cutoff (`open_until`), never at "now", to avo
 ## API rate limits (important when touching ETL or caching)
 
 - Active alerts: ~8–12 req/min.
-- Per-region history: **2 req/min**. `fetch_and_process_data` sleeps 31 s between oblast requests, so a full history load (~25 oblasts) takes ~13 minutes. Never remove the delay or parallelise these calls, or the token risks being blacklisted.
+- Per-region history: **2 req/min**. `fetch_and_process_data` sleeps 31 s between oblast requests, so a full history load (24 oblasts; Luhansk is skipped because it is excluded from every count) takes ~12 minutes. Never remove the delay or parallelise these calls, or the token risks being blacklisted.
 - Turning off "Fetch 30-day history" in the sidebar loads only active alerts, which is instant. Use this while iterating on the UI.
 
 ## Project tooling (`.claude/`)

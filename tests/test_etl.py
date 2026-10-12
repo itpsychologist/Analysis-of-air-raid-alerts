@@ -155,3 +155,17 @@ def test_raion_units_and_risk_per_raion():
     assert raion_count() == 119  # 118 raions + Kyiv City (Luhansk excluded)
     fc = pd.DataFrame({"forecast": [119.0, 119.0]})
     assert compute_risk_forecast_score(fc, n_units=119) == pytest.approx(0.5)
+
+
+def test_luhansk_is_neither_counted_nor_fetched(monkeypatch):
+    import etl
+
+    assert OBLAST_EN_MAP["Луганська область"] not in etl.counted_oblasts_en()
+    assert len(etl.counted_oblasts_en()) == 24
+    fetched = []
+    monkeypatch.setattr(etl, "fetch_active_alerts", lambda token: [])
+    monkeypatch.setattr(etl, "fetch_oblast_history", lambda token, uid, period: fetched.append(uid) or [])
+    monkeypatch.setattr(etl.time, "sleep", lambda s: None)
+    etl.fetch_and_process_data("token", fetch_history=True)
+    assert etl.OBLAST_UID_MAP["Луганська область"] not in fetched
+    assert len(fetched) == 24
