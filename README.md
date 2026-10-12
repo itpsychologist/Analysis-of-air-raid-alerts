@@ -12,8 +12,9 @@ The repository has two parts:
 
 1. **The dashboard** (`app.py`): live and 30-day alert analytics with a short-term forecast.
 2. **The forecasting study** (`src/`, `scripts/`, `tests/`): hourly and daily forecasts per raion, evaluated
-   without data leakage on the most recent 4 weeks. The results are in a self-contained static report,
-   [`reports/index.html`](reports/index.html). Download it and open it in any browser; it works offline.
+   without data leakage on the most recent 4 weeks. The results are in a self-contained static report:
+   **[itpsychologist.github.io/Analysis-of-air-raid-alerts](https://itpsychologist.github.io/Analysis-of-air-raid-alerts/)**
+   (source: [`reports/index.html`](reports/index.html); it also works offline when downloaded).
 
 ---
 
