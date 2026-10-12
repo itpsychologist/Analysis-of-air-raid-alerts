@@ -132,6 +132,9 @@ uv venv --python python3.12 .venv && uv pip install --python .venv/bin/python -r
 .venv/bin/python -m pytest                            # 111 tests, incl. leakage tests
 ```
 
+The whole project was built with an AI assistant (Claude Code); the conversation log is in
+[`AI_CONVERSATION_LOG.md`](AI_CONVERSATION_LOG.md) (`scripts/build_conversation_log.py` regenerates it).
+
 A new data snapshot does not move the frozen test window. `run_final_test.py` refuses to run once
 `reports/results/final_test.json` exists.
 

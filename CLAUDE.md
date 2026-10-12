@@ -23,6 +23,7 @@ uv venv --python /opt/homebrew/bin/python3.12 .venv && uv pip install --python .
 .venv/bin/python scripts/run_final_test.py --rehearse <scratch dir>  # full final-test pipeline on the validation window (safe; h=1 reproduces backtest.csv)
 .venv/bin/python scripts/run_final_test.py      # the ONE-TIME final-test run (done 2026-10-11; refuses to re-run, needs committed code)
 .venv/bin/python scripts/build_report.py        # reports/results -> reports/index.html (self-contained, offline; --cdn for a small file)
+.venv/bin/python scripts/build_conversation_log.py  # AI_CONVERSATION_LOG.md from the local Claude Code transcripts (secrets masked; review before publishing)
 ```
 
 The app requires `ALERTS_API_TOKEN`, resolved in `get_api_token()` (app.py) from `st.secrets` first, then the environment variable. Locally, put it in `.streamlit/secrets.toml` (gitignored).
