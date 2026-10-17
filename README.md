@@ -15,6 +15,8 @@ The repository has two parts:
    without data leakage on the most recent 4 weeks. The results are in a self-contained static report:
    **[itpsychologist.github.io/Analysis-of-air-raid-alerts](https://itpsychologist.github.io/Analysis-of-air-raid-alerts/)**
    (source: [`reports/index.html`](reports/index.html); it also works offline when downloaded).
+   How it works, from data processing to the models, with code excerpts (in Ukrainian):
+   [`docs/PROJECT_DESCRIPTION.md`](docs/PROJECT_DESCRIPTION.md).
 
 ---
 
